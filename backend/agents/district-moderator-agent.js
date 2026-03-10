@@ -63,7 +63,10 @@ IMPORTANT:
 - List at least 5 major housing estates (屋苑) in this district with specific predictions.
 - Cite at least 4 real news events, policies, or market developments with sources that drive your predictions.
 - ALL prices MUST be in HKD (Hong Kong Dollars). Price ranges are HK$ per sq ft (saleable area). For example: HK$12,000/sqft, HK$15,000/sqft.
-- Be specific about real estate names — use actual well-known estates in this district.`,
+- Be specific about real estate names — use actual well-known estates in this district.
+- ALL text values in the JSON (summary, narrative, impact, keyFactors, risks, opportunities, headline, etc.) MUST be written in Traditional Chinese (繁體中文). JSON keys remain in English.
+- Estate names should include both English and Chinese names.
+- News sources can keep their original English names (e.g. SCMP, HKEJ).`,
       temperature: config.llm.moderatorTemperature,
       maxTokens: config.llm.moderatorMaxTokens,
     });

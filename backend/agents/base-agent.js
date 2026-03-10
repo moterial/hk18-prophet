@@ -60,10 +60,10 @@ export class BaseAgent {
     const trimmedContext = context.slice(0, 1000);
     const trimmedMemory = memoryCtx.slice(0, 500);
     const messages = [
-      { role: 'system', content: this.systemPrompt + '\n\nYou MUST respond with valid JSON only, no markdown, no code fences. Keep your response concise.' },
+      { role: 'system', content: this.systemPrompt + '\n\nYou MUST respond with valid JSON only, no markdown, no code fences. Keep your response concise. All text values in JSON MUST be in Traditional Chinese (繁體中文). JSON keys stay in English.' },
       {
         role: 'user',
-        content: `${trimmedPrompt}\n\n${trimmedContext}${trimmedMemory}\n\nRespond with valid JSON only. Use this structure:\n{"analysis":"brief analysis","districtImpacts":[{"districtCode":"XX","impact":"desc","direction":"up|down|stable","magnitude":5,"reasoning":"why"}],"keyFactors":["factor1"],"risksAndUncertainties":["risk1"],"confidence":0.7}`
+        content: `${trimmedPrompt}\n\n${trimmedContext}${trimmedMemory}\n\n請用繁體中文回覆。Respond with valid JSON only (keys in English, values in 繁體中文). Use this structure:\n{"analysis":"簡要分析","districtImpacts":[{"districtCode":"XX","impact":"影響描述","direction":"up|down|stable","magnitude":5,"reasoning":"原因"}],"keyFactors":["因素1"],"risksAndUncertainties":["風險1"],"confidence":0.7}`
       }
     ];
 

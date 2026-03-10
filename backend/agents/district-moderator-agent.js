@@ -4,6 +4,10 @@ import { config } from '../config.js';
 
 export class DistrictModeratorAgent extends BaseAgent {
   constructor(district) {
+    const estateList = (district.majorEstates || []).map(e =>
+      `  - ${e.name} (${e.nameCn}) — ${e.area}`
+    ).join('\n');
+
     super({
       name: `District Moderator — ${district.name}`,
       role: 'district-moderator',
@@ -16,6 +20,9 @@ District Profile:
 - Character: ${district.character}
 - Current Price Range: HK$${district.priceRange[0].toLocaleString()} – $${district.priceRange[1].toLocaleString()} per sq ft
 - Key Drivers: ${district.keyDrivers.join(', ')}
+
+VERIFIED Major Estates in This District (YOU MUST ONLY USE THESE):
+${estateList}
 
 Your output MUST be valid JSON with this structure:
 {
@@ -60,12 +67,12 @@ Your output MUST be valid JSON with this structure:
 }
 
 IMPORTANT:
-- List at least 5 major housing estates (屋苑) in this district with specific predictions.
+- You MUST ONLY use estates from the VERIFIED list above. DO NOT invent or guess estate names. If an estate is not in the list, do NOT include it.
+- List at least 5 major housing estates (屋苑) from the verified list with specific predictions.
 - Cite at least 4 real news events, policies, or market developments with sources that drive your predictions.
 - ALL prices MUST be in HKD (Hong Kong Dollars). Price ranges are HK$ per sq ft (saleable area). For example: HK$12,000/sqft, HK$15,000/sqft.
-- Be specific about real estate names — use actual well-known estates in this district.
 - ALL text values in the JSON (summary, narrative, impact, keyFactors, risks, opportunities, headline, etc.) MUST be written in Traditional Chinese (繁體中文). JSON keys remain in English.
-- Estate names should include both English and Chinese names.
+- Estate names should include both English and Chinese names exactly as provided in the verified list.
 - News sources can keep their original English names (e.g. SCMP, HKEJ).`,
       temperature: config.llm.moderatorTemperature,
       maxTokens: config.llm.moderatorMaxTokens,

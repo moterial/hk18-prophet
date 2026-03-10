@@ -7,7 +7,7 @@
 
 <p align="center">
   <img src="https://img.shields.io/badge/node-%3E%3D18-green" />
-  <img src="https://img.shields.io/badge/license-MIT-blue" />
+  <img src="https://img.shields.io/badge/license-All%20Rights%20Reserved-red" />
   <img src="https://img.shields.io/badge/agents-9%20types-orange" />
   <img src="https://img.shields.io/badge/districts-18-red" />
   <img src="https://img.shields.io/badge/language-繁體中文-yellow" />
@@ -314,7 +314,7 @@ Click district on map
 
 ## 📜 License
 
-MIT License — see [LICENSE](LICENSE) for details.
+All rights reserved. You must obtain written permission from the author before using, copying, or distributing this software. See [LICENSE](LICENSE) for details.
 
 ---
 

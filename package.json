@@ -1,0 +1,39 @@
+{
+  "name": "hk18-prophet",
+  "version": "0.1.0",
+  "description": "Multi-agent swarm intelligence engine for Hong Kong 18-district real estate price prediction",
+  "main": "backend/server.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently \"npm run backend\" \"npm run frontend\"",
+    "backend": "node --watch backend/server.js",
+    "frontend": "cd frontend && npm run dev",
+    "setup": "npm install && cd frontend && npm install",
+    "start": "node backend/server.js",
+    "test": "node --test backend/**/*.test.js"
+  },
+  "keywords": [
+    "hong-kong",
+    "real-estate",
+    "prediction",
+    "multi-agent",
+    "swarm-intelligence",
+    "llm",
+    "ai",
+    "property",
+    "18-districts"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "better-sqlite3": "^11.7.0",
+    "cors": "^2.8.5",
+    "dotenv": "^16.4.7",
+    "express": "^4.21.2",
+    "openai": "^4.77.0",
+    "uuid": "^11.0.5"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

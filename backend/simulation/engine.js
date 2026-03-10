@@ -1,15 +1,45 @@
 // backend/simulation/engine.js — Core simulation loop: thematic → district → moderator
 import { v4 as uuidv4 } from 'uuid';
-import { createAgentTeam } from '../agents/index.js';
+import { createAgentTeam, createSingleDistrictTeam } from '../agents/index.js';
 import { config } from '../config.js';
 import { saveSimulationMemory, savePredictionMemory, getMemoryContext } from './memory-store.js';
 import { saveSimulation, updateSimulationStatus, saveDistrictPredictions } from '../db/database.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
-const DELAY_BETWEEN_AGENTS = parseInt(process.env.DELAY_BETWEEN_AGENTS || '6000', 10); // 6s default (~10 req/min, safe for Gemini free tier)
+const DELAY_BETWEEN_AGENTS = parseInt(process.env.DELAY_BETWEEN_AGENTS || '1000', 10); // 1s default (Grok/OpenAI have generous limits)
 
 // In-memory tracking of running simulations
 const activeSimulations = new Map();
+
+// Track which districts currently have a running simulation
+const runningDistricts = new Map(); // districtCode -> simulationId
+
+// District result cache: { report, timestamp }
+const districtCache = new Map();
+const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+
+export function getCachedDistrictResult(districtCode) {
+  const cached = districtCache.get(districtCode.toUpperCase());
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp > CACHE_TTL) {
+    districtCache.delete(districtCode.toUpperCase());
+    return null;
+  }
+  return cached;
+}
+
+export function getRunningDistricts() {
+  const running = {};
+  for (const [code, simId] of runningDistricts.entries()) {
+    const status = activeSimulations.get(simId);
+    if (status && status.status === 'running') {
+      running[code] = { simulationId: simId, agentsCompleted: status.agentsCompleted, totalAgents: status.totalAgents, currentPhase: status.currentPhase };
+    } else {
+      runningDistricts.delete(code);
+    }
+  }
+  return running;
+}
 
 export function getSimulationStatus(simulationId) {
   return activeSimulations.get(simulationId) || null;
@@ -167,4 +197,134 @@ async function runSimulation(simulationId, { seedData, predictionQuery, rounds }
   return moderatorResult.result;
 }
 
-export default { startSimulation, getSimulationStatus };
+// ── Single-district simulation (lightweight: 6 thematic + 1 district + 1 moderator = 8 LLM calls) ──
+
+export async function startDistrictSimulation({ districtCode }) {
+  const district = config.districts.find(d => d.code === districtCode.toUpperCase());
+  if (!district) throw new Error(`Unknown district code: ${districtCode}`);
+
+  const simulationId = uuidv4();
+  const predictionQuery = `Provide a detailed prediction for ${district.name} (${district.nameCn}) real estate prices over the next 1 year, 5 years, and 10 years. Include analysis of major housing estates (屋苑) in this district with specific price predictions.`;
+
+  const status = {
+    id: simulationId,
+    status: 'starting',
+    districtCode: district.code,
+    districtName: district.name,
+    currentRound: 0,
+    totalRounds: 1,
+    currentPhase: 'initializing',
+    agentsCompleted: 0,
+    totalAgents: 0,
+    transcript: [],
+    report: null,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+  };
+
+  activeSimulations.set(simulationId, status);
+
+  saveSimulation({
+    id: simulationId,
+    status: 'running',
+    rounds: 1,
+    seedData: JSON.stringify({ districtCode: district.code }),
+    predictionQuery,
+  });
+
+  runDistrictSimulation(simulationId, district, predictionQuery).catch(err => {
+    console.error(`❌ District simulation ${simulationId} failed:`, err);
+    status.status = 'failed';
+    status.error = err.message;
+    runningDistricts.delete(district.code);
+    updateSimulationStatus(simulationId, 'failed');
+  });
+
+  // Track this district as running
+  runningDistricts.set(district.code, simulationId);
+
+  return { simulationId, status: 'started', districtCode: district.code };
+}
+
+async function runDistrictSimulation(simulationId, district, predictionQuery) {
+  const status = activeSimulations.get(simulationId);
+  status.status = 'running';
+
+  const { thematicAgents, districtAgent, moderator } = createSingleDistrictTeam(district);
+  status.totalAgents = thematicAgents.length + 1 + 1; // thematic + district + moderator
+
+  const memoryCtx = getMemoryContext();
+  const basePrompt = `${predictionQuery}\n${memoryCtx}`;
+
+  // Phase 1: Thematic agents — run in parallel for speed
+  status.currentRound = 1;
+  status.currentPhase = 'Thematic Analysis';
+  console.log(`\n🔄 District simulation for ${district.name} — Thematic agents (parallel)...`);
+
+  const thematicPromises = thematicAgents.map(agent => {
+    console.log(`    🤖 ${agent.name}...`);
+    return agent.analyze(basePrompt, '');
+  });
+  const thematicResults = await Promise.all(thematicPromises);
+  status.agentsCompleted += thematicResults.length;
+  thematicResults.forEach(result => {
+    status.transcript.push({ round: 1, phase: 'thematic', agent: result.agent, role: result.role, result: result.result });
+  });
+
+  // Phase 2: District agent
+  status.currentPhase = `District Analysis — ${district.name}`;
+  console.log(`  🏘️ District agent: ${district.name}...`);
+
+  const thematicSummary = thematicResults.map(r =>
+    `[${r.role}] ${r.result.analysis || 'No analysis'}`
+  ).join('\n\n');
+  const districtContext = `\n--- Thematic Agent Views ---\n${thematicSummary}`;
+
+  await sleep(DELAY_BETWEEN_AGENTS);
+  const districtResult = await districtAgent.analyze(basePrompt, districtContext);
+  status.agentsCompleted += 1;
+  status.transcript.push({ round: 1, phase: 'district', agent: districtResult.agent, role: districtResult.role, result: districtResult.result });
+
+  // Phase 3: Moderator synthesizes — estate-level predictions + news
+  status.currentPhase = 'Moderator Synthesis';
+  console.log(`  🎯 Moderator synthesizing for ${district.name}...`);
+
+  const allViews = [
+    ...thematicResults.map(r => `[${r.agent}]\n${JSON.stringify(r.result, null, 2)}`),
+    `[${districtResult.agent}]\n${JSON.stringify(districtResult.result, null, 2)}`,
+  ].join('\n\n---\n\n');
+
+  await sleep(DELAY_BETWEEN_AGENTS);
+  const moderatorResult = await moderator.analyze(
+    `Synthesize all agent views into a detailed prediction report for ${district.name} (${district.nameCn}). Include per-estate (屋苑) predictions and cite major news/causes with sources.\n\nOriginal query: ${predictionQuery}`,
+    `\n--- All Agent Views ---\n${allViews}`
+  );
+
+  status.agentsCompleted += 1;
+  status.transcript.push({ round: 'final', phase: 'moderator', agent: moderatorResult.agent, result: moderatorResult.result });
+
+  status.report = moderatorResult.result;
+  status.status = 'completed';
+  status.completedAt = new Date().toISOString();
+  status.currentPhase = 'Complete';
+
+  saveSimulationMemory(simulationId, { query: predictionQuery, report: moderatorResult.result });
+
+  try {
+    const districtPredictions = moderatorResult.result.districtPredictions || [moderatorResult.result];
+    saveDistrictPredictions(simulationId, districtPredictions);
+    updateSimulationStatus(simulationId, 'completed');
+  } catch (err) {
+    console.error('⚠️ DB save error:', err.message);
+  }
+
+  // Cache the result
+  districtCache.set(district.code, { report: moderatorResult.result, timestamp: Date.now(), simulationId });
+  runningDistricts.delete(district.code);
+
+  console.log(`\n✅ District simulation for ${district.name} completed!`);
+  return moderatorResult.result;
+}
+
+export default { startSimulation, startDistrictSimulation, getSimulationStatus, getRunningDistricts };

@@ -36,12 +36,14 @@ body {
 .app-header {
   background: #161b22;
   border-bottom: 1px solid #30363d;
-  padding: 16px 24px;
+  padding: 10px 20px;
+  height: 58px;
+  display: flex;
+  align-items: center;
 }
 
 .header-content {
-  max-width: 1400px;
-  margin: 0 auto;
+  width: 100%;
   display: flex;
   align-items: baseline;
   gap: 16px;
@@ -59,9 +61,8 @@ body {
 }
 
 main {
-  max-width: 1400px;
-  margin: 0 auto;
-  padding: 24px;
+  margin: 0;
+  padding: 0;
 }
 
 a {

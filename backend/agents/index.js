@@ -7,6 +7,7 @@ import { InfrastructureAgent } from './infrastructure-agent.js';
 import { ChinaPolicyAgent } from './china-policy-agent.js';
 import { DistrictAgent, createDistrictAgents } from './district-agent.js';
 import { ModeratorAgent } from './moderator-agent.js';
+import { DistrictModeratorAgent } from './district-moderator-agent.js';
 import { config } from '../config.js';
 
 const THEMATIC_AGENTS = [
@@ -24,6 +25,14 @@ export function createAgentTeam() {
   const moderator = new ModeratorAgent();
 
   return { thematicAgents, districtAgents, moderator };
+}
+
+export function createSingleDistrictTeam(district) {
+  const thematicAgents = THEMATIC_AGENTS.map(a => new a.Class());
+  const districtAgent = new DistrictAgent(district);
+  const moderator = new DistrictModeratorAgent(district);
+
+  return { thematicAgents, districtAgent, moderator };
 }
 
 export function getAgentManifest() {

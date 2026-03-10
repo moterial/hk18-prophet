@@ -1,7 +1,7 @@
 // backend/routes/api.js — REST API routes
 import { Router } from 'express';
 import { config } from '../config.js';
-import { startSimulation, getSimulationStatus } from '../simulation/engine.js';
+import { startSimulation, startDistrictSimulation, getSimulationStatus, getCachedDistrictResult, getRunningDistricts } from '../simulation/engine.js';
 import { getAgentManifest } from '../agents/index.js';
 import { NewsFetcher } from '../data-sources/news-fetcher.js';
 import {
@@ -141,4 +141,51 @@ apiRouter.get('/simulations', (req, res) => {
 apiRouter.get('/simulation/:id/predictions', (req, res) => {
   const predictions = getSimulationPredictions(req.params.id);
   res.json(predictions);
+});
+
+// GET /api/districts/status — Get running/cached status for all districts
+apiRouter.get('/districts/status', (req, res) => {
+  const statuses = {};
+  for (const d of config.districts) {
+    const cached = getCachedDistrictResult(d.code);
+    if (cached) {
+      statuses[d.code] = { status: 'completed', direction: cached.report?.direction || 'stable', simulationId: cached.simulationId, cachedAt: new Date(cached.timestamp).toISOString() };
+    }
+  }
+  const running = getRunningDistricts();
+  for (const [code, info] of Object.entries(running)) {
+    statuses[code] = { status: 'running', ...info };
+  }
+  res.json(statuses);
+});
+
+// POST /api/district/:code/analyze — Start single-district analysis
+apiRouter.post('/district/:code/analyze', async (req, res) => {
+  try {
+    const code = req.params.code.toUpperCase();
+    const district = config.districts.find(d => d.code === code);
+    if (!district) {
+      return res.status(404).json({ error: 'District not found' });
+    }
+
+    // Check cache first — return cached result if < 1 hour old (unless force=true)
+    const force = req.query.force === 'true';
+    if (!force) {
+      const cached = getCachedDistrictResult(code);
+      if (cached) {
+        return res.json({ cached: true, report: cached.report, simulationId: cached.simulationId, cachedAt: new Date(cached.timestamp).toISOString() });
+      }
+      // If already running, return the existing simulation ID
+      const running = getRunningDistricts();
+      if (running[code]) {
+        return res.json({ status: 'running', simulationId: running[code].simulationId, districtCode: code });
+      }
+    }
+
+    const result = await startDistrictSimulation({ districtCode: code });
+    res.json(result);
+  } catch (err) {
+    console.error('❌ District simulation error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });

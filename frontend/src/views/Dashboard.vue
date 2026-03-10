@@ -1,620 +1,494 @@
 <template>
-  <div class="dashboard">
-    <!-- Simulation Controls -->
-    <section class="control-panel">
-      <h2>🔮 New Prediction Simulation</h2>
-      <div class="form-group">
-        <label>Prediction Query</label>
-        <textarea
-          v-model="predictionQuery"
-          rows="3"
-          placeholder="e.g., Predict HK property price trends for the next 3-12 months, considering recent stamp duty removal and rate cuts..."
-        ></textarea>
-      </div>
-      <div class="form-row">
-        <div class="form-group">
-          <label>Debate Rounds</label>
-          <select v-model.number="rounds">
-            <option :value="1">1 (Quick)</option>
-            <option :value="2">2</option>
-            <option :value="3">3 (Balanced)</option>
-            <option :value="5">5 (Deep)</option>
-          </select>
-        </div>
-        <div class="form-group">
-          <label>Seed Data (optional JSON)</label>
-          <textarea v-model="seedDataRaw" rows="2" placeholder='{"notes": "any extra context..."}'></textarea>
-        </div>
-      </div>
-      <button @click="startSimulation" :disabled="isRunning" class="btn-primary">
-        {{ isRunning ? '⏳ Simulation Running...' : '🚀 Start Simulation' }}
-      </button>
-    </section>
+  <div class="fullpage-map">
+    <!-- Full-page SVG Map -->
+    <HKMap
+      :districts="districts"
+      :selectedCode="selectedDistrict"
+      :analyzedDistricts="analyzedDistricts"
+      :runningDistricts="runningDistricts"
+      @select="onDistrictSelect"
+    />
 
-    <!-- Status -->
-    <section v-if="currentStatus" class="status-panel">
-      <h2>📡 Simulation Status</h2>
-      <div class="status-grid">
-        <div class="status-item">
-          <span class="label">Status</span>
-          <span :class="['value', 'status-' + currentStatus.status]">{{ currentStatus.status }}</span>
-        </div>
-        <div class="status-item">
-          <span class="label">Phase</span>
-          <span class="value">{{ currentStatus.currentPhase }}</span>
-        </div>
-        <div class="status-item">
-          <span class="label">Round</span>
-          <span class="value">{{ currentStatus.currentRound }} / {{ currentStatus.totalRounds }}</span>
-        </div>
-        <div class="status-item">
-          <span class="label">Agents</span>
-          <span class="value">{{ currentStatus.agentsCompleted }} / {{ currentStatus.totalAgents }}</span>
-        </div>
-      </div>
-      <div v-if="currentStatus.error" class="error-box">❌ {{ currentStatus.error }}</div>
-    </section>
+    <!-- Legend -->
+    <div class="map-legend">
+      <div class="legend-item"><span class="dot dot-up"></span> Price Up</div>
+      <div class="legend-item"><span class="dot dot-down"></span> Price Down</div>
+      <div class="legend-item"><span class="dot dot-stable"></span> Stable</div>
+      <div class="legend-item"><span class="dot dot-loading"></span> Analyzing...</div>
+      <div class="legend-item"><span class="dot dot-none"></span> Not Analyzed</div>
+    </div>
 
-    <!-- Report Results -->
-    <section v-if="report" class="report-panel">
-      <h2>📋 Prediction Report</h2>
-      <div class="report-summary">
-        <div class="summary-header">
-          <span class="direction-badge" :class="'dir-' + report.overallDirection">
-            {{ directionEmoji(report.overallDirection) }} {{ report.overallDirection?.toUpperCase() }}
-          </span>
-          <span class="confidence">Confidence: {{ (report.overallConfidence * 100).toFixed(0) }}%</span>
-        </div>
-        <p class="summary-text">{{ report.summary }}</p>
-        <div v-if="report.keyThemes?.length" class="themes">
-          <strong>Key Themes:</strong>
-          <span v-for="theme in report.keyThemes" :key="theme" class="theme-tag">{{ theme }}</span>
-        </div>
-      </div>
+    <!-- Modal Overlay -->
+    <Teleport to="body">
+      <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
+        <div class="modal-container">
+          <button class="modal-close" @click="closeModal">&times;</button>
 
-      <!-- 18-District Grid -->
-      <h3>🗺️ 18-District Predictions</h3>
-      <div class="district-grid">
-        <div
-          v-for="dp in report.districtPredictions"
-          :key="dp.districtCode"
-          class="district-card"
-          :class="'dir-' + dp.direction"
-        >
-          <div class="card-header">
-            <span class="district-code">{{ dp.districtCode }}</span>
-            <span class="direction-arrow">{{ directionEmoji(dp.direction) }}</span>
+          <!-- Loading/Running state -->
+          <div v-if="isDistrictRunning(selectedDistrict)" class="modal-loading">
+            <div class="loading-spinner"></div>
+            <h3>Analyzing {{ getDistrictName(selectedDistrict) }}...</h3>
+            <p class="loading-hint">You can close this and come back anytime</p>
+            <div v-if="getDistrictProgress(selectedDistrict)" class="loading-detail">
+              <div class="status-phase">{{ getDistrictProgress(selectedDistrict).currentPhase }}</div>
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: getProgressPercent(selectedDistrict) + '%' }"></div>
+              </div>
+              <div class="status-agents">{{ getDistrictProgress(selectedDistrict).agentsCompleted || 0 }} / {{ getDistrictProgress(selectedDistrict).totalAgents || 8 }} agents</div>
+            </div>
           </div>
-          <div class="card-name">{{ dp.districtName }}</div>
-          <div class="card-predictions">
-            <div class="pred"><span>3m</span> {{ dp.predictedChange3m }}</div>
-            <div class="pred"><span>6m</span> {{ dp.predictedChange6m }}</div>
-            <div class="pred"><span>12m</span> {{ dp.predictedChange12m }}</div>
-          </div>
-          <div class="card-confidence">
-            Confidence: {{ ((dp.confidence || 0) * 100).toFixed(0) }}%
-            <span class="consensus">{{ dp.agentConsensus }}</span>
-          </div>
-          <div class="card-factors" v-if="dp.keyFactors?.length">
-            <div v-for="f in dp.keyFactors.slice(0, 3)" :key="f" class="factor">{{ f }}</div>
-          </div>
-          <div class="card-narrative" v-if="dp.narrative">{{ dp.narrative }}</div>
-        </div>
-      </div>
 
-      <!-- Top Insights -->
-      <div class="insights-row" v-if="report.topOpportunities?.length || report.topRisks?.length">
-        <div class="insight-box opportunities" v-if="report.topOpportunities?.length">
-          <h4>🟢 Top Opportunities</h4>
-          <ul><li v-for="o in report.topOpportunities" :key="o">{{ o }}</li></ul>
-        </div>
-        <div class="insight-box risks" v-if="report.topRisks?.length">
-          <h4>🔴 Top Risks</h4>
-          <ul><li v-for="r in report.topRisks" :key="r">{{ r }}</li></ul>
-        </div>
-      </div>
-    </section>
+          <!-- Result state -->
+          <div v-else-if="districtReports[selectedDistrict]" class="modal-result">
+            <div class="modal-header">
+              <div>
+                <h2>{{ districtReports[selectedDistrict].districtNameCn || getDistrictNameCn(selectedDistrict) }} {{ districtReports[selectedDistrict].districtName || getDistrictName(selectedDistrict) }}</h2>
+                <span class="code-badge">{{ selectedDistrict }}</span>
+              </div>
+              <div class="header-badges">
+                <span class="direction-badge" :class="'dir-' + districtReports[selectedDistrict].direction">
+                  {{ directionEmoji(districtReports[selectedDistrict].direction) }} {{ districtReports[selectedDistrict].direction?.toUpperCase() }}
+                </span>
+                <span class="confidence-badge">{{ ((districtReports[selectedDistrict].confidence || 0) * 100).toFixed(0) }}% confidence</span>
+              </div>
+            </div>
 
-    <!-- Past Simulations -->
-    <section class="history-panel">
-      <h2>📜 Past Simulations</h2>
-      <div v-if="pastSimulations.length === 0" class="empty">No simulations yet. Run one above!</div>
-      <div v-else class="history-list">
-        <div v-for="sim in pastSimulations" :key="sim.id" class="history-item" @click="loadSimulation(sim.id)">
-          <span class="hist-status" :class="'status-' + sim.status">{{ sim.status }}</span>
-          <span class="hist-query">{{ sim.prediction_query?.slice(0, 80) || 'No query' }}</span>
-          <span class="hist-date">{{ formatDate(sim.created_at) }}</span>
+            <div class="summary-box">{{ districtReports[selectedDistrict].summary }}</div>
+
+            <!-- Price Predictions: 1yr, 5yr, 10yr -->
+            <div class="predictions-row">
+              <div class="pred-card" v-for="(p, key) in districtReports[selectedDistrict].predictions" :key="key">
+                <div class="pred-label">{{ formatPeriod(key) }}</div>
+                <div class="pred-change" :class="changeClass(p.change)">{{ p.change }}</div>
+                <div class="pred-range" v-if="p.priceRange">
+                  HK${{ p.priceRange[0]?.toLocaleString() }} – HK${{ p.priceRange[1]?.toLocaleString() }}/sqft
+                </div>
+                <div class="pred-narrative">{{ p.narrative }}</div>
+              </div>
+            </div>
+
+            <!-- Estates -->
+            <h3 class="section-title">🏘️ Major Housing Estates 主要屋苑</h3>
+            <div class="estates-grid">
+              <div v-for="estate in districtReports[selectedDistrict].estates" :key="estate.name" class="estate-card">
+                <div class="estate-top">
+                  <div>
+                    <strong>{{ estate.nameCn || estate.name }}</strong>
+                    <span class="estate-en" v-if="estate.nameCn"> {{ estate.name }}</span>
+                  </div>
+                  <span class="rec-badge" :class="'rec-' + estate.recommendation">{{ estate.recommendation }}</span>
+                </div>
+                <div class="estate-area" v-if="estate.area">📍 {{ estate.area }}</div>
+                <div class="estate-price" v-if="estate.currentPricePerSqft">
+                  Current: <strong>HK${{ estate.currentPricePerSqft?.toLocaleString() }}/sqft</strong>
+                </div>
+                <div class="estate-preds">
+                  <span v-for="(val, k) in estate.predictions" :key="k" class="estate-pred" :class="changeClass(val)">
+                    {{ formatPeriod(k) }}: {{ val }}
+                  </span>
+                </div>
+                <div class="estate-factors" v-if="estate.keyFactors?.length">
+                  <span v-for="f in estate.keyFactors" :key="f" class="factor-tag">{{ f }}</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- News & Causes -->
+            <h3 class="section-title">📰 Major News & Causes</h3>
+            <div class="news-list">
+              <div v-for="(news, i) in districtReports[selectedDistrict].newsCauses" :key="i" class="news-card" :class="'impact-' + news.direction">
+                <div class="news-head">
+                  <span>{{ news.direction === 'positive' ? '🟢' : news.direction === 'negative' ? '🔴' : '🟡' }}</span>
+                  <strong>{{ news.headline }}</strong>
+                </div>
+                <div class="news-meta">
+                  <span>📎 {{ news.source }}</span>
+                  <span>⏱️ {{ news.timeframe }}</span>
+                </div>
+                <div class="news-impact">{{ news.impact }}</div>
+              </div>
+            </div>
+
+            <!-- Risks & Opportunities -->
+            <div class="ro-row">
+              <div class="ro-box opp" v-if="districtReports[selectedDistrict].opportunities?.length">
+                <h4>🟢 Opportunities</h4>
+                <ul><li v-for="o in districtReports[selectedDistrict].opportunities" :key="o">{{ o }}</li></ul>
+              </div>
+              <div class="ro-box risk" v-if="districtReports[selectedDistrict].risks?.length">
+                <h4>🔴 Risks</h4>
+                <ul><li v-for="r in districtReports[selectedDistrict].risks" :key="r">{{ r }}</li></ul>
+              </div>
+            </div>
+
+            <button class="btn-reanalyze" @click="forceReanalyze(selectedDistrict)">🔄 Re-analyze (force refresh)</button>
+          </div>
+
+          <!-- Error state -->
+          <div v-else class="modal-loading">
+            <div style="font-size:3rem;margin-bottom:12px;">⚠️</div>
+            <h3>Analysis failed for {{ getDistrictName(selectedDistrict) }}</h3>
+            <button class="btn-retry" @click="forceReanalyze(selectedDistrict)">🔄 Retry</button>
+          </div>
         </div>
       </div>
-    </section>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, onMounted, onUnmounted } from 'vue';
+import HKMap from '../components/HKMap.vue';
 
-const predictionQuery = ref('Predict Hong Kong property price trends for the next 3-12 months across all 18 districts.');
-const rounds = ref(3);
-const seedDataRaw = ref('');
-const isRunning = ref(false);
-const currentStatus = ref(null);
-const report = ref(null);
-const pastSimulations = ref([]);
-let pollInterval = null;
+const districts = ref([]);
+const selectedDistrict = ref(null);
+const showModal = ref(false);
+const analyzedDistricts = reactive({});  // code -> { direction }
+const runningDistricts = reactive({});   // code -> { simulationId, agentsCompleted, totalAgents, currentPhase }
+const districtReports = reactive({});    // code -> report object
+
+// Track polling intervals per district (multiple can run)
+const pollIntervals = {};
 
 function directionEmoji(dir) {
   if (dir === 'up') return '⬆️';
   if (dir === 'down') return '⬇️';
-  if (dir === 'stable') return '➡️';
-  return '🔄';
+  return '➡️';
 }
 
-function formatDate(dateStr) {
-  if (!dateStr) return '';
-  return new Date(dateStr).toLocaleDateString('en-HK', { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+function getDistrictName(code) {
+  return districts.value.find(x => x.code === code)?.name || code;
 }
 
-async function startSimulation() {
-  isRunning.value = true;
-  report.value = null;
+function getDistrictNameCn(code) {
+  return districts.value.find(x => x.code === code)?.nameCn || '';
+}
 
-  let seedData = {};
-  if (seedDataRaw.value.trim()) {
-    try {
-      seedData = JSON.parse(seedDataRaw.value);
-    } catch {
-      seedData = { notes: seedDataRaw.value };
-    }
+function formatPeriod(key) {
+  if (key === '1year') return '1 Year';
+  if (key === '5year') return '5 Years';
+  if (key === '10year') return '10 Years';
+  return key;
+}
+
+function changeClass(val) {
+  if (!val) return '';
+  if (typeof val === 'string' && val.startsWith('+')) return 'change-up';
+  if (typeof val === 'string' && val.startsWith('-')) return 'change-down';
+  return 'change-stable';
+}
+
+function isDistrictRunning(code) {
+  return !!runningDistricts[code];
+}
+
+function getDistrictProgress(code) {
+  return runningDistricts[code] || null;
+}
+
+function getProgressPercent(code) {
+  const p = runningDistricts[code];
+  if (!p || !p.totalAgents) return 0;
+  return Math.round((p.agentsCompleted / p.totalAgents) * 100);
+}
+
+function closeModal() {
+  showModal.value = false;
+  selectedDistrict.value = null;
+}
+
+async function onDistrictSelect(code) {
+  selectedDistrict.value = code;
+  showModal.value = true;
+
+  // If already have a cached report and not running, show it instantly
+  if (districtReports[code] && !runningDistricts[code]) {
+    return;
   }
 
+  // If already running, just open modal to show progress (poll is already active)
+  if (runningDistricts[code]) {
+    return;
+  }
+
+  // Otherwise start analysis
   try {
-    const res = await fetch('/api/simulation/start', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        predictionQuery: predictionQuery.value,
-        rounds: rounds.value,
-        seedData,
-      }),
-    });
+    const res = await fetch(`/api/district/${code}/analyze`, { method: 'POST' });
     const data = await res.json();
 
-    if (data.simulationId) {
-      currentStatus.value = { id: data.simulationId, status: 'started', currentPhase: 'Initializing...', currentRound: 0, totalRounds: rounds.value, agentsCompleted: 0, totalAgents: 0 };
-      startPolling(data.simulationId);
+    if (data.cached && data.report) {
+      districtReports[code] = data.report;
+      analyzedDistricts[code] = { direction: data.report.direction || 'stable' };
+      return;
     }
-  } catch (err) {
-    currentStatus.value = { status: 'failed', error: err.message, currentPhase: 'Error' };
-    isRunning.value = false;
+
+    if (data.status === 'running' && data.simulationId) {
+      // Already running on server, just start polling
+      runningDistricts[code] = { simulationId: data.simulationId, agentsCompleted: 0, totalAgents: 8, currentPhase: 'Starting...' };
+      startPolling(data.simulationId, code);
+      return;
+    }
+
+    if (data.simulationId) {
+      runningDistricts[code] = { simulationId: data.simulationId, agentsCompleted: 0, totalAgents: 8, currentPhase: 'Starting...' };
+      startPolling(data.simulationId, code);
+    }
+  } catch {
+    // Error
   }
 }
 
-function startPolling(simulationId) {
-  if (pollInterval) clearInterval(pollInterval);
-  pollInterval = setInterval(async () => {
+async function forceReanalyze(code) {
+  if (runningDistricts[code]) return;
+  delete districtReports[code];
+  delete analyzedDistricts[code];
+
+  try {
+    const res = await fetch(`/api/district/${code}/analyze?force=true`, { method: 'POST' });
+    const data = await res.json();
+    if (data.simulationId) {
+      runningDistricts[code] = { simulationId: data.simulationId, agentsCompleted: 0, totalAgents: 8, currentPhase: 'Starting...' };
+      startPolling(data.simulationId, code);
+    }
+  } catch {
+    // Error
+  }
+}
+
+function startPolling(simulationId, districtCode) {
+  // Clear existing poll for this district
+  if (pollIntervals[districtCode]) {
+    clearInterval(pollIntervals[districtCode]);
+  }
+
+  pollIntervals[districtCode] = setInterval(async () => {
     try {
       const res = await fetch(`/api/simulation/${simulationId}/status`);
       const data = await res.json();
-      currentStatus.value = data;
+
+      if (runningDistricts[districtCode]) {
+        runningDistricts[districtCode].agentsCompleted = data.agentsCompleted || 0;
+        runningDistricts[districtCode].totalAgents = data.totalAgents || 8;
+        runningDistricts[districtCode].currentPhase = data.currentPhase || 'Analyzing...';
+      }
 
       if (data.status === 'completed') {
-        clearInterval(pollInterval);
-        pollInterval = null;
-        isRunning.value = false;
-        await loadReport(simulationId);
-        await loadPastSimulations();
+        clearInterval(pollIntervals[districtCode]);
+        delete pollIntervals[districtCode];
+        await loadReport(simulationId, districtCode);
+        delete runningDistricts[districtCode];
       } else if (data.status === 'failed') {
-        clearInterval(pollInterval);
-        pollInterval = null;
-        isRunning.value = false;
+        clearInterval(pollIntervals[districtCode]);
+        delete pollIntervals[districtCode];
+        delete runningDistricts[districtCode];
       }
     } catch {
-      // polling error, will retry
+      // retry on next tick
     }
-  }, 2000);
+  }, 1500);
 }
 
-async function loadReport(simulationId) {
+async function loadReport(simulationId, districtCode) {
   try {
     const res = await fetch(`/api/simulation/${simulationId}/report`);
     const data = await res.json();
     if (data.report) {
-      report.value = data.report;
+      districtReports[districtCode] = data.report;
+      analyzedDistricts[districtCode] = { direction: data.report.direction || 'stable' };
     }
-  } catch {
-    // report load error
-  }
+  } catch { /* */ }
 }
 
-async function loadSimulation(simulationId) {
-  currentStatus.value = { id: simulationId, status: 'loading', currentPhase: 'Loading...' };
-  await loadReport(simulationId);
-  currentStatus.value = { id: simulationId, status: 'completed', currentPhase: 'Complete' };
-}
-
-async function loadPastSimulations() {
+async function loadDistricts() {
   try {
-    const res = await fetch('/api/simulations');
-    pastSimulations.value = await res.json();
-  } catch {
-    // load error
-  }
+    const res = await fetch('/api/districts');
+    districts.value = await res.json();
+  } catch { /* */ }
+}
+
+// On mount, load districts and check for any already-cached results on the server
+async function loadExistingStatuses() {
+  try {
+    const res = await fetch('/api/districts/status');
+    const statuses = await res.json();
+    for (const [code, info] of Object.entries(statuses)) {
+      if (info.status === 'completed') {
+        analyzedDistricts[code] = { direction: info.direction || 'stable' };
+        // Pre-fetch the report so clicking shows it instantly
+        if (info.simulationId) {
+          loadReport(info.simulationId, code);
+        }
+      } else if (info.status === 'running') {
+        runningDistricts[code] = { simulationId: info.simulationId, agentsCompleted: info.agentsCompleted || 0, totalAgents: info.totalAgents || 8, currentPhase: info.currentPhase || 'Analyzing...' };
+        startPolling(info.simulationId, code);
+      }
+    }
+  } catch { /* */ }
 }
 
 onMounted(() => {
-  loadPastSimulations();
+  loadDistricts();
+  loadExistingStatuses();
 });
 
 onUnmounted(() => {
-  if (pollInterval) clearInterval(pollInterval);
+  for (const key of Object.keys(pollIntervals)) {
+    clearInterval(pollIntervals[key]);
+  }
 });
 </script>
 
 <style scoped>
-.dashboard {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
-}
-
-section {
-  background: #161b22;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  padding: 24px;
-}
-
-h2 {
-  margin-bottom: 16px;
-  font-size: 1.2rem;
-  color: #f0f6fc;
-}
-
-h3 {
-  margin: 20px 0 12px;
-  color: #f0f6fc;
-}
-
-.form-group {
-  margin-bottom: 12px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 4px;
-  font-size: 0.85rem;
-  color: #8b949e;
-}
-
-.form-group textarea,
-.form-group select {
-  width: 100%;
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  color: #e1e4e8;
-  padding: 8px 12px;
-  font-size: 0.9rem;
-  font-family: inherit;
-}
-
-.form-group textarea:focus,
-.form-group select:focus {
-  border-color: #58a6ff;
-  outline: none;
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 200px 1fr;
-  gap: 16px;
-}
-
-.btn-primary {
-  background: #238636;
-  color: #fff;
-  border: none;
-  border-radius: 6px;
-  padding: 10px 24px;
-  font-size: 1rem;
-  font-weight: 600;
-  cursor: pointer;
-  transition: background 0.15s;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: #2ea043;
-}
-
-.btn-primary:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.status-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-  gap: 12px;
-}
-
-.status-item {
-  background: #0d1117;
-  border-radius: 6px;
-  padding: 12px;
-}
-
-.status-item .label {
-  display: block;
-  font-size: 0.75rem;
-  color: #8b949e;
-  text-transform: uppercase;
-  margin-bottom: 4px;
-}
-
-.status-item .value {
-  font-size: 1.1rem;
-  font-weight: 600;
-}
-
-.status-completed { color: #3fb950; }
-.status-running, .status-started { color: #d29922; }
-.status-failed { color: #f85149; }
-.status-loading { color: #58a6ff; }
-
-.error-box {
-  margin-top: 12px;
-  padding: 12px;
-  background: #1c0b0b;
-  border: 1px solid #f85149;
-  border-radius: 6px;
-  color: #f85149;
-}
-
-.report-summary {
-  background: #0d1117;
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 16px;
-}
-
-.summary-header {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-  margin-bottom: 12px;
-}
-
-.direction-badge {
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-weight: 700;
-  font-size: 0.9rem;
-}
-
-.dir-up { background: rgba(63, 185, 80, 0.15); color: #3fb950; border: 1px solid #3fb950; }
-.dir-down { background: rgba(248, 81, 73, 0.15); color: #f85149; border: 1px solid #f85149; }
-.dir-stable { background: rgba(88, 166, 255, 0.15); color: #58a6ff; border: 1px solid #58a6ff; }
-.dir-mixed { background: rgba(210, 153, 34, 0.15); color: #d29922; border: 1px solid #d29922; }
-
-.confidence {
-  color: #8b949e;
-  font-size: 0.9rem;
-}
-
-.summary-text {
-  color: #c9d1d9;
-  line-height: 1.6;
-}
-
-.themes {
-  margin-top: 12px;
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px;
-  align-items: center;
-}
-
-.theme-tag {
-  background: #21262d;
-  border: 1px solid #30363d;
-  border-radius: 16px;
-  padding: 2px 10px;
-  font-size: 0.8rem;
-  color: #8b949e;
-}
-
-.district-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
-  gap: 12px;
-}
-
-.district-card {
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 8px;
-  padding: 16px;
-  transition: border-color 0.15s;
-}
-
-.district-card:hover {
-  border-color: #58a6ff;
-}
-
-.district-card.dir-up { border-left: 3px solid #3fb950; }
-.district-card.dir-down { border-left: 3px solid #f85149; }
-.district-card.dir-stable { border-left: 3px solid #58a6ff; }
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  margin-bottom: 4px;
-}
-
-.district-code {
-  font-weight: 700;
-  font-size: 1rem;
-  color: #f0f6fc;
-}
-
-.direction-arrow {
-  font-size: 1.2rem;
-}
-
-.card-name {
-  font-size: 0.85rem;
-  color: #8b949e;
-  margin-bottom: 8px;
-}
-
-.card-predictions {
-  display: flex;
-  gap: 12px;
-  margin-bottom: 8px;
-}
-
-.pred {
-  font-weight: 600;
-  font-size: 0.9rem;
-}
-
-.pred span {
-  display: block;
-  font-size: 0.7rem;
-  color: #8b949e;
-  font-weight: 400;
-}
-
-.card-confidence {
-  font-size: 0.75rem;
-  color: #8b949e;
-  margin-bottom: 6px;
-}
-
-.consensus {
-  margin-left: 8px;
-  text-transform: uppercase;
-  font-weight: 600;
-}
-
-.card-factors {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px;
-  margin-bottom: 6px;
-}
-
-.factor {
-  background: #21262d;
-  border-radius: 4px;
-  padding: 1px 6px;
-  font-size: 0.7rem;
-  color: #8b949e;
-}
-
-.card-narrative {
-  font-size: 0.8rem;
-  color: #8b949e;
-  line-height: 1.4;
-  margin-top: 4px;
-}
-
-.insights-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 16px;
-  margin-top: 16px;
-}
-
-.insight-box {
-  background: #0d1117;
-  border-radius: 8px;
-  padding: 16px;
-}
-
-.insight-box h4 {
-  margin-bottom: 8px;
-}
-
-.insight-box ul {
-  list-style: none;
-  padding: 0;
-}
-
-.insight-box li {
-  padding: 4px 0;
-  font-size: 0.85rem;
-  color: #c9d1d9;
-}
-
-.insight-box li::before {
-  content: '•';
-  margin-right: 8px;
-}
-
-.opportunities { border: 1px solid #238636; }
-.risks { border: 1px solid #f85149; }
-
-.empty {
-  color: #8b949e;
-  text-align: center;
-  padding: 20px;
-}
-
-.history-list {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.history-item {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 12px;
-  background: #0d1117;
-  border: 1px solid #30363d;
-  border-radius: 6px;
-  cursor: pointer;
-  transition: border-color 0.15s;
-}
-
-.history-item:hover {
-  border-color: #58a6ff;
-}
-
-.hist-status {
-  font-size: 0.75rem;
-  font-weight: 700;
-  text-transform: uppercase;
-  min-width: 80px;
-}
-
-.hist-query {
-  flex: 1;
-  font-size: 0.85rem;
-  color: #c9d1d9;
+.fullpage-map {
+  position: relative;
+  width: 100vw;
+  height: calc(100vh - 58px);
   overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  background: #0a0e17;
 }
 
-.hist-date {
-  font-size: 0.8rem;
+.map-legend {
+  position: absolute;
+  bottom: 16px;
+  left: 16px;
+  background: rgba(13,17,23,0.9);
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 10px 14px;
+  display: flex;
+  gap: 14px;
+  font-size: 0.75rem;
   color: #8b949e;
-  white-space: nowrap;
+  z-index: 10;
+}
+.legend-item { display: flex; align-items: center; gap: 5px; }
+.dot { width: 10px; height: 10px; border-radius: 50%; display: inline-block; }
+.dot-up { background: #3fb950; }
+.dot-down { background: #f85149; }
+.dot-stable { background: #58a6ff; }
+.dot-loading { background: #d29922; animation: pulse-dot 1.5s ease-in-out infinite; }
+@keyframes pulse-dot { 0%, 100% { opacity: 1; } 50% { opacity: 0.3; } }
+.dot-none { background: #30363d; border: 1px solid #484f58; }
+
+/* Modal */
+.modal-overlay {
+  position: fixed; inset: 0; z-index: 1000;
+  background: rgba(0,0,0,0.7);
+  display: flex; align-items: center; justify-content: center;
+  backdrop-filter: blur(4px);
+}
+.modal-container {
+  background: #0d1117;
+  border: 1px solid #30363d;
+  border-radius: 12px;
+  width: 90vw;
+  max-width: 900px;
+  max-height: 85vh;
+  overflow-y: auto;
+  padding: 28px 32px;
+  position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+.modal-close {
+  position: absolute; top: 12px; right: 16px;
+  background: none; border: none; color: #8b949e;
+  font-size: 1.8rem; cursor: pointer; line-height: 1;
+}
+.modal-close:hover { color: #f0f6fc; }
+
+/* Loading */
+.modal-loading {
+  display: flex; flex-direction: column; align-items: center;
+  justify-content: center; min-height: 300px; text-align: center;
+}
+.loading-spinner {
+  width: 48px; height: 48px; border: 3px solid #30363d;
+  border-top: 3px solid #58a6ff; border-radius: 50%;
+  animation: spin 1s linear infinite; margin-bottom: 16px;
+}
+@keyframes spin { to { transform: rotate(360deg); } }
+.modal-loading h3 { color: #f0f6fc; margin-bottom: 8px; }
+.loading-hint { color: #8b949e; font-size: 0.8rem; margin-bottom: 16px; }
+.loading-detail { width: 280px; }
+.status-phase { font-size: 0.85rem; color: #58a6ff; margin-bottom: 8px; }
+.progress-bar { height: 6px; background: #21262d; border-radius: 3px; overflow: hidden; }
+.progress-fill { height: 100%; background: #58a6ff; border-radius: 3px; transition: width 0.5s ease; }
+.status-agents { font-size: 0.8rem; color: #8b949e; margin-top: 6px; }
+
+/* Result */
+.modal-header { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 16px; flex-wrap: wrap; gap: 12px; }
+.modal-header h2 { font-size: 1.4rem; color: #f0f6fc; margin-bottom: 4px; }
+.code-badge { background: #21262d; border: 1px solid #30363d; border-radius: 4px; padding: 2px 8px; font-size: 0.75rem; color: #8b949e; }
+.header-badges { display: flex; gap: 8px; align-items: center; }
+.direction-badge { padding: 4px 12px; border-radius: 20px; font-weight: 700; font-size: 0.85rem; }
+.dir-up { background: rgba(63,185,80,0.15); color: #3fb950; border: 1px solid #3fb950; }
+.dir-down { background: rgba(248,81,73,0.15); color: #f85149; border: 1px solid #f85149; }
+.dir-stable { background: rgba(88,166,255,0.15); color: #58a6ff; border: 1px solid #58a6ff; }
+.dir-mixed { background: rgba(210,153,34,0.15); color: #d29922; border: 1px solid #d29922; }
+.confidence-badge { font-size: 0.8rem; color: #8b949e; }
+
+.summary-box {
+  background: #161b22; border: 1px solid #30363d; border-radius: 8px;
+  padding: 14px; margin-bottom: 20px; color: #c9d1d9; line-height: 1.6; font-size: 0.9rem;
 }
 
-@media (max-width: 768px) {
-  .form-row {
-    grid-template-columns: 1fr;
-  }
-  .district-grid {
-    grid-template-columns: 1fr;
-  }
-  .insights-row {
-    grid-template-columns: 1fr;
-  }
+.predictions-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; margin-bottom: 20px; }
+.pred-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 14px; text-align: center; }
+.pred-label { font-size: 0.7rem; color: #8b949e; text-transform: uppercase; letter-spacing: 1px; margin-bottom: 4px; }
+.pred-change { font-size: 1.5rem; font-weight: 800; margin-bottom: 4px; }
+.change-up { color: #3fb950; }
+.change-down { color: #f85149; }
+.change-stable { color: #58a6ff; }
+.pred-range { font-size: 0.7rem; color: #58a6ff; margin-bottom: 4px; }
+.pred-narrative { font-size: 0.75rem; color: #8b949e; line-height: 1.4; }
+
+.section-title { font-size: 1rem; color: #f0f6fc; margin-bottom: 10px; }
+
+.estates-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: 10px; margin-bottom: 20px; }
+.estate-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px; }
+.estate-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 4px; }
+.estate-top strong { color: #f0f6fc; font-size: 0.9rem; }
+.estate-en { color: #8b949e; font-size: 0.75rem; margin-left: 4px; }
+.rec-badge { font-size: 0.65rem; font-weight: 700; text-transform: uppercase; padding: 2px 7px; border-radius: 4px; white-space: nowrap; }
+.rec-buy { background: rgba(63,185,80,0.15); color: #3fb950; }
+.rec-hold { background: rgba(88,166,255,0.15); color: #58a6ff; }
+.rec-wait { background: rgba(210,153,34,0.15); color: #d29922; }
+.rec-sell { background: rgba(248,81,73,0.15); color: #f85149; }
+.estate-area { font-size: 0.75rem; color: #8b949e; margin-bottom: 3px; }
+.estate-price { font-size: 0.8rem; color: #c9d1d9; margin-bottom: 6px; }
+.estate-preds { display: flex; gap: 8px; margin-bottom: 6px; flex-wrap: wrap; }
+.estate-pred { font-size: 0.75rem; font-weight: 700; }
+.estate-factors { display: flex; flex-wrap: wrap; gap: 4px; }
+.factor-tag { background: #21262d; border-radius: 4px; padding: 1px 6px; font-size: 0.65rem; color: #8b949e; }
+
+.news-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 20px; }
+.news-card { background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 12px; border-left: 3px solid #30363d; }
+.news-card.impact-positive { border-left-color: #3fb950; }
+.news-card.impact-negative { border-left-color: #f85149; }
+.news-card.impact-neutral { border-left-color: #d29922; }
+.news-head { display: flex; gap: 6px; align-items: flex-start; margin-bottom: 4px; }
+.news-head strong { color: #f0f6fc; font-size: 0.85rem; }
+.news-meta { display: flex; gap: 14px; font-size: 0.7rem; color: #8b949e; margin-bottom: 4px; }
+.news-impact { font-size: 0.8rem; color: #c9d1d9; line-height: 1.4; }
+
+.ro-row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+.ro-box { background: #161b22; border-radius: 8px; padding: 12px; }
+.ro-box h4 { margin-bottom: 6px; font-size: 0.85rem; }
+.ro-box ul { list-style: none; padding: 0; }
+.ro-box li { padding: 2px 0; font-size: 0.8rem; color: #c9d1d9; }
+.ro-box li::before { content: '•'; margin-right: 6px; }
+.opp { border: 1px solid #238636; }
+.risk { border: 1px solid #f85149; }
+
+.btn-reanalyze, .btn-retry {
+  background: #21262d; border: 1px solid #30363d; color: #c9d1d9;
+  border-radius: 6px; padding: 8px 20px; font-size: 0.85rem; cursor: pointer;
+}
+.btn-reanalyze:hover, .btn-retry:hover { border-color: #58a6ff; background: #1c2333; }
+
+@media (max-width: 700px) {
+  .modal-container { width: 95vw; padding: 16px; }
+  .predictions-row { grid-template-columns: 1fr; }
+  .ro-row { grid-template-columns: 1fr; }
 }
 </style>

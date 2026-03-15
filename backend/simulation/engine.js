@@ -257,17 +257,22 @@ async function runDistrictSimulation(simulationId, district, predictionQuery) {
   const memoryCtx = getMemoryContext();
   const basePrompt = `${predictionQuery}\n${memoryCtx}`;
 
-  // Phase 1: Thematic agents — run in parallel for speed
+  // Phase 1: Thematic agents — run sequentially to avoid proxy rate limits
   status.currentRound = 1;
   status.currentPhase = 'Thematic Analysis';
-  console.log(`\n🔄 District simulation for ${district.name} — Thematic agents (parallel)...`);
+  console.log(`\n🔄 District simulation for ${district.name} — Thematic agents...`);
 
-  const thematicPromises = thematicAgents.map(agent => {
+  const thematicResults = [];
+  for (const agent of thematicAgents) {
     console.log(`    🤖 ${agent.name}...`);
-    return agent.analyze(basePrompt, '');
-  });
-  const thematicResults = await Promise.all(thematicPromises);
-  status.agentsCompleted += thematicResults.length;
+    const result = await agent.analyze(basePrompt, '');
+    thematicResults.push(result);
+    status.agentsCompleted += 1;
+    console.log(`    ✅ ${agent.name} done`);
+    if (agent !== thematicAgents[thematicAgents.length - 1]) {
+      await sleep(DELAY_BETWEEN_AGENTS);
+    }
+  }
   thematicResults.forEach(result => {
     status.transcript.push({ round: 1, phase: 'thematic', agent: result.agent, role: result.role, result: result.result });
   });

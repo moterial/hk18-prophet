@@ -6,6 +6,51 @@ function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
+/**
+ * Attempt to repair truncated JSON by closing open strings, arrays, and objects.
+ */
+function repairJSON(str) {
+  // Remove trailing incomplete key-value (e.g. `,"key": "unterminated`)
+  let s = str;
+
+  // If inside an unterminated string, close it
+  let inString = false;
+  let escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (escaped) { escaped = false; continue; }
+    if (c === '\\') { escaped = true; continue; }
+    if (c === '"') inString = !inString;
+  }
+  if (inString) s += '"';
+
+  // Remove trailing comma if present
+  s = s.replace(/,\s*$/, '');
+
+  // Count open braces/brackets and close them
+  let openBraces = 0, openBrackets = 0;
+  inString = false;
+  escaped = false;
+  for (let i = 0; i < s.length; i++) {
+    const c = s[i];
+    if (escaped) { escaped = false; continue; }
+    if (c === '\\') { escaped = true; continue; }
+    if (c === '"') { inString = !inString; continue; }
+    if (inString) continue;
+    if (c === '{') openBraces++;
+    else if (c === '}') openBraces--;
+    else if (c === '[') openBrackets++;
+    else if (c === ']') openBrackets--;
+  }
+
+  // Remove trailing comma again after string repair
+  s = s.replace(/,\s*$/, '');
+
+  while (openBrackets > 0) { s += ']'; openBrackets--; }
+  while (openBraces > 0) { s += '}'; openBraces--; }
+  return s;
+}
+
 export class BaseAgent {
   constructor({ name, role, systemPrompt, temperature, maxTokens }) {
     this.name = name;
@@ -17,6 +62,7 @@ export class BaseAgent {
     this.client = new OpenAI({
       apiKey: config.llm.apiKey,
       baseURL: config.llm.baseUrl,
+      timeout: 120000, // 120s global timeout
     });
   }
 
@@ -30,21 +76,33 @@ export class BaseAgent {
       this.memory.map((m, i) => `Round ${i + 1}: ${JSON.stringify(m)}`).join('\n');
   }
 
-  async callLLM(messages, retries = 5) {
+  async callLLM(messages, retries = 2) {
+    const isReasoning = /reasoner|r1/i.test(config.llm.modelName);
+    const perCallTimeout = isReasoning ? 180000 : 90000; // 180s for reasoning, 90s for normal
+
     for (let attempt = 0; attempt <= retries; attempt++) {
+      const controller = new AbortController();
+      const timer = setTimeout(() => controller.abort(), perCallTimeout);
       try {
-        const response = await this.client.chat.completions.create({
+        const params = {
           model: config.llm.modelName,
           messages,
-          temperature: this.temperature,
           max_tokens: this.maxTokens,
-        });
+        };
+        // Reasoning models don't support temperature
+        if (!isReasoning) {
+          params.temperature = this.temperature;
+        }
+        const response = await this.client.chat.completions.create(params, { signal: controller.signal });
+        clearTimeout(timer);
         return response;
       } catch (error) {
+        clearTimeout(timer);
         const isRateLimit = error.status === 429 || error.message?.includes('429');
-        if (isRateLimit && attempt < retries) {
-          const delay = Math.min(15000 * (attempt + 1), 60000);
-          console.log(`⏳ [${this.name}] Rate limited, waiting ${delay / 1000}s (attempt ${attempt + 1}/${retries})...`);
+        const isTimeout = error.name === 'AbortError' || error.code === 'ETIMEDOUT' || error.message?.includes('timeout');
+        if ((isRateLimit || isTimeout) && attempt < retries) {
+          const delay = Math.min(10000 * (attempt + 1), 30000);
+          console.log(`⏳ [${this.name}] ${isTimeout ? 'Timeout' : 'Rate limited'}, retrying in ${delay / 1000}s (attempt ${attempt + 1}/${retries})...`);
           await sleep(delay);
           continue;
         }
@@ -69,12 +127,22 @@ export class BaseAgent {
 
     try {
       const response = await this.callLLM(messages);
-      let content = response.choices[0]?.message?.content || '{}';
+      if (!response?.choices?.length) {
+        console.error(`⚠️ [${this.name}] Unexpected API response structure:`, JSON.stringify(response, null, 2).slice(0, 500));
+      }
+      let content = response?.choices?.[0]?.message?.content || '{}';
       
       // Strip markdown code fences if the model wrapped the JSON
       content = content.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim();
       
-      const parsed = JSON.parse(content);
+      // Attempt to repair truncated JSON (closing open braces/brackets)
+      let parsed;
+      try {
+        parsed = JSON.parse(content);
+      } catch (parseErr) {
+        console.warn(`⚠️ [${this.name}] JSON parse failed, attempting repair...`);
+        parsed = JSON.parse(repairJSON(content));
+      }
       this.addMemory(parsed);
       return {
         agent: this.name,

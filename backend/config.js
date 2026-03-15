@@ -7,10 +7,10 @@ export const config = {
     apiKey: process.env.LLM_API_KEY || '',
     baseUrl: process.env.LLM_BASE_URL || 'https://api.openai.com/v1',
     modelName: process.env.LLM_MODEL_NAME || 'gpt-4o-mini',
-    agentTemperature: 0.7,
-    moderatorTemperature: 0.3,
-    agentMaxTokens: 800,
-    moderatorMaxTokens: 3000,
+    agentTemperature: 0.4,
+    moderatorTemperature: 0.2,
+    agentMaxTokens: 2000,
+    moderatorMaxTokens: 8000,
   },
 
   // Server

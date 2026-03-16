@@ -189,12 +189,37 @@ apiRouter.get('/estates/search', (req, res) => {
   res.json(results);
 });
 
-// POST /api/estate/analyze — Start single-estate analysis
+// POST /api/estate/analyze — Start single-estate analysis (known or free-text)
 apiRouter.post('/estate/analyze', async (req, res) => {
   try {
-    const { estateName, districtCode } = req.body;
+    const { estateName, districtCode, query } = req.body;
+    const force = req.query.force === 'true';
+
+    // Free-text mode: user typed any building name
+    if (query) {
+      const q = query.trim();
+      if (!q || q.length < 2) {
+        return res.status(400).json({ error: 'query must be at least 2 characters' });
+      }
+      // Include district code in cache key if provided
+      const cacheDistrict = districtCode ? districtCode.toUpperCase() : '';
+      const estateKey = cacheDistrict ? `custom:${cacheDistrict}:${q}` : `custom:${q}`;
+      if (!force) {
+        const cached = getCachedEstateResult(estateKey);
+        if (cached) {
+          return res.json({ cached: true, report: cached.report, simulationId: cached.simulationId });
+        }
+      }
+      const result = await startEstateSimulation({
+        query: q,
+        districtCode: cacheDistrict || undefined,
+      });
+      return res.json(result);
+    }
+
+    // Known estate mode: from config
     if (!estateName || !districtCode) {
-      return res.status(400).json({ error: 'estateName and districtCode are required' });
+      return res.status(400).json({ error: 'estateName + districtCode or query is required' });
     }
 
     const code = districtCode.toUpperCase();
@@ -211,9 +236,6 @@ apiRouter.post('/estate/analyze', async (req, res) => {
     }
 
     const estateKey = `${code}:${estate.name}`;
-
-    // Check cache
-    const force = req.query.force === 'true';
     if (!force) {
       const cached = getCachedEstateResult(estateKey);
       if (cached) {

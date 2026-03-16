@@ -346,27 +346,49 @@ export function getCachedEstateResult(estateKey) {
   return cached;
 }
 
-export async function startEstateSimulation({ estateName, districtCode }) {
-  const district = config.districts.find(d => d.code === districtCode.toUpperCase());
-  if (!district) throw new Error(`Unknown district code: ${districtCode}`);
+export async function startEstateSimulation({ estateName, districtCode, query }) {
+  let estate, district, estateKey, predictionQuery;
 
-  const estate = district.majorEstates.find(e =>
-    e.name.toLowerCase() === estateName.toLowerCase() ||
-    e.nameCn === estateName
-  );
-  if (!estate) throw new Error(`Estate not found in district ${districtCode}: ${estateName}`);
+  if (query) {
+    // Free-text mode — optionally with user-selected district
+    estate = { name: query, nameCn: query, area: 'Hong Kong' };
 
-  const estateKey = `${district.code}:${estate.name}`;
+    if (districtCode) {
+      // User picked a district — use full district profile for better accuracy
+      district = config.districts.find(d => d.code === districtCode.toUpperCase());
+      estateKey = `custom:${districtCode.toUpperCase()}:${query}`;
+      predictionQuery = district
+        ? `Provide an in-depth prediction report for the Hong Kong property/estate "${query}" in ${district.name} (${district.nameCn}). This property is located in the ${district.name} district (${district.region}). Include detailed price predictions for 1 year, 5 years, and 10 years, key factors, risks, opportunities, comparable estates, and relevant news.`
+        : `Provide an in-depth prediction report for the Hong Kong property/estate "${query}". First identify which district this property is in. Then provide detailed price predictions for 1 year, 5 years, and 10 years, key factors, risks, opportunities, comparable estates, and relevant news.`;
+    } else {
+      // No district selected — LLM figures it out
+      district = null;
+      estateKey = `custom:${query}`;
+      predictionQuery = `Provide an in-depth prediction report for the Hong Kong property/estate "${query}". First identify which district this property is in. Then provide detailed price predictions for 1 year, 5 years, and 10 years, key factors, risks, opportunities, comparable estates, and relevant news. If you cannot identify this property, provide your best analysis based on available knowledge.`;
+    }
+  } else {
+    // Known estate mode
+    district = config.districts.find(d => d.code === districtCode.toUpperCase());
+    if (!district) throw new Error(`Unknown district code: ${districtCode}`);
+
+    estate = district.majorEstates.find(e =>
+      e.name.toLowerCase() === estateName.toLowerCase() ||
+      e.nameCn === estateName
+    );
+    if (!estate) throw new Error(`Estate not found in district ${districtCode}: ${estateName}`);
+
+    estateKey = `${district.code}:${estate.name}`;
+    predictionQuery = `Provide an in-depth prediction report for ${estate.name} (${estate.nameCn}) in ${district.name} (${district.nameCn}). Include detailed price predictions for 1 year, 5 years, and 10 years, key factors, risks, opportunities, comparable estates, and relevant news.`;
+  }
+
   const simulationId = uuidv4();
-  const predictionQuery = `Provide an in-depth prediction report for ${estate.name} (${estate.nameCn}) in ${district.name} (${district.nameCn}). Include detailed price predictions for 1 year, 5 years, and 10 years, key factors, risks, opportunities, comparable estates, and relevant news.`;
-
   const status = {
     id: simulationId,
     status: 'starting',
     estateKey,
     estateName: estate.name,
-    districtCode: district.code,
-    districtName: district.name,
+    districtCode: district?.code || '',
+    districtName: district?.name || '',
     currentRound: 0,
     totalRounds: 1,
     currentPhase: 'initializing',
@@ -385,7 +407,7 @@ export async function startEstateSimulation({ estateName, districtCode }) {
     id: simulationId,
     status: 'running',
     rounds: 1,
-    seedData: JSON.stringify({ estateKey, estateName: estate.name, districtCode: district.code }),
+    seedData: JSON.stringify({ estateKey, estateName: estate.name, districtCode: district?.code || '' }),
     predictionQuery,
   });
 
@@ -412,7 +434,7 @@ async function runEstateSimulation(simulationId, estate, district, predictionQue
   // Phase 1: Run 3 key thematic agents sequentially
   status.currentRound = 1;
   status.currentPhase = 'Thematic Analysis';
-  console.log(`\n🏠 Estate simulation for ${estate.name} (${district.name}) — Thematic agents...`);
+  console.log(`\n🏠 Estate simulation for ${estate.name} (${district?.name || 'Custom'}) — Thematic agents...`);
 
   const thematicResults = [];
   for (const agent of thematicAgents) {
@@ -445,7 +467,7 @@ async function runEstateSimulation(simulationId, estate, district, predictionQue
   status.currentPhase = 'Complete';
 
   // Cache the result
-  const estateKey = `${district.code}:${estate.name}`;
+  const estateKey = district ? `${district.code}:${estate.name}` : `custom:${estate.name}`;
   estateCache.set(estateKey, { report: estateResult.result, timestamp: Date.now(), simulationId });
 
   try {

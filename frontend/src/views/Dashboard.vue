@@ -27,13 +27,15 @@
           @input="onSearchInput"
           @focus="showSearchResults = searchResults.length > 0"
           @keydown.escape="showSearchResults = false"
+          @keydown.enter="onCustomEstateSearch"
           type="text"
-          placeholder="Search estate / building (e.g. 太古城, Belcher's)..."
+          placeholder="Search any estate / building (e.g. 太古城, Belcher's, 嘉湖山莊)..."
           class="search-input"
         />
         <button v-if="searchQuery" class="search-clear" @click="clearSearch">&times;</button>
       </div>
-      <div v-if="showSearchResults && searchResults.length > 0" class="search-dropdown">
+      <div v-if="showSearchResults && searchQuery.length >= 2" class="search-dropdown">
+        <!-- Config matches -->
         <div
           v-for="item in searchResults"
           :key="item.name + item.districtCode"
@@ -48,9 +50,13 @@
             📍 {{ item.area }} · {{ item.districtNameCn }} {{ item.districtName }}
           </div>
         </div>
-      </div>
-      <div v-if="showSearchResults && searchQuery.length >= 2 && searchResults.length === 0" class="search-dropdown">
-        <div class="search-no-results">No estates found for "{{ searchQuery }}"</div>
+        <!-- Free-text custom search option -->
+        <div class="search-result-item search-custom" @click="onCustomEstateSearch">
+          <div class="search-result-name">
+            <strong>🔎 Analyze "{{ searchQuery }}"</strong>
+          </div>
+          <div class="search-result-meta">Search any building / estate in Hong Kong</div>
+        </div>
       </div>
     </div>
 
@@ -165,6 +171,31 @@
             <div style="font-size:3rem;margin-bottom:12px;">⚠️</div>
             <h3>Analysis failed for {{ getDistrictName(selectedDistrict) }}</h3>
             <button class="btn-retry" @click="forceReanalyze(selectedDistrict)">🔄 Retry</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
+
+    <!-- District Picker Modal (for custom search) -->
+    <Teleport to="body">
+      <div v-if="showDistrictPicker" class="modal-overlay" @click.self="showDistrictPicker = false">
+        <div class="district-picker-container">
+          <button class="modal-close" @click="showDistrictPicker = false">&times;</button>
+          <h3 class="picker-title">📍 Select District for "{{ pendingCustomQuery }}"</h3>
+          <p class="picker-subtitle">Choose which district this property belongs to for more accurate prediction</p>
+          <div class="district-grid">
+            <div
+              v-for="d in districts"
+              :key="d.code"
+              class="district-pick-card"
+              @click="onDistrictPicked(d)"
+            >
+              <div class="pick-name">{{ d.nameCn }}</div>
+              <div class="pick-en">{{ d.name }}</div>
+            </div>
+          </div>
+          <div class="picker-skip">
+            <button class="btn-skip" @click="onDistrictPicked(null)">Skip — let AI determine the district</button>
           </div>
         </div>
       </div>
@@ -333,6 +364,10 @@ const estateProgress = ref(null);
 const estateSimulationId = ref(null);
 let estateSearchTimeout = null;
 let estatePollInterval = null;
+
+// District picker state (for custom search)
+const showDistrictPicker = ref(false);
+const pendingCustomQuery = ref('');
 
 const estateProgressPercent = computed(() => {
   if (!estateProgress.value || !estateProgress.value.totalAgents) return 0;
@@ -515,6 +550,27 @@ function clearSearch() {
   showSearchResults.value = false;
 }
 
+function onCustomEstateSearch() {
+  if (searchQuery.value.trim().length < 2) return;
+  pendingCustomQuery.value = searchQuery.value.trim();
+  showSearchResults.value = false;
+  showDistrictPicker.value = true;
+}
+
+function onDistrictPicked(district) {
+  showDistrictPicker.value = false;
+  const customEstate = {
+    name: pendingCustomQuery.value,
+    nameCn: pendingCustomQuery.value,
+    area: district ? district.name : '',
+    districtCode: district ? district.code : '',
+    districtName: district ? district.name : '',
+    districtNameCn: district ? district.nameCn : '',
+    isCustom: true,
+  };
+  onEstateSelect(customEstate);
+}
+
 async function onEstateSelect(estate) {
   selectedEstate.value = estate;
   showSearchResults.value = false;
@@ -524,10 +580,13 @@ async function onEstateSelect(estate) {
   estateProgress.value = null;
 
   try {
+    const payload = estate.isCustom
+      ? { query: estate.name, ...(estate.districtCode ? { districtCode: estate.districtCode } : {}) }
+      : { estateName: estate.name, districtCode: estate.districtCode };
     const res = await fetch('/api/estate/analyze', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ estateName: estate.name, districtCode: estate.districtCode }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
 
@@ -589,10 +648,13 @@ async function reanalyzeEstate() {
   estateReport.value = null;
   estateProgress.value = null;
   try {
+    const payload = selectedEstate.value.isCustom
+      ? { query: selectedEstate.value.name, ...(selectedEstate.value.districtCode ? { districtCode: selectedEstate.value.districtCode } : {}) }
+      : { estateName: selectedEstate.value.name, districtCode: selectedEstate.value.districtCode };
     const res = await fetch('/api/estate/analyze?force=true', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ estateName: selectedEstate.value.name, districtCode: selectedEstate.value.districtCode }),
+      body: JSON.stringify(payload),
     });
     const data = await res.json();
     if (data.simulationId) {
@@ -727,6 +789,37 @@ onUnmounted(() => {
 .search-result-en { color: #8b949e; font-size: 0.8rem; margin-left: 6px; }
 .search-result-meta { font-size: 0.75rem; color: #8b949e; margin-top: 2px; }
 .search-no-results { padding: 14px; text-align: center; color: #484f58; font-size: 0.85rem; }
+.search-custom { border-top: 1px solid #30363d; background: rgba(88,166,255,0.05); }
+.search-custom:hover { background: rgba(88,166,255,0.1); }
+.search-custom .search-result-name strong { color: #58a6ff; }
+
+/* District Picker */
+.district-picker-container {
+  background: #161b22; border: 1px solid #30363d; border-radius: 16px;
+  padding: 28px; max-width: 640px; width: 90vw; max-height: 80vh;
+  overflow-y: auto; position: relative;
+}
+.picker-title { margin: 0 0 6px; font-size: 1.2rem; color: #e6edf3; }
+.picker-subtitle { margin: 0 0 18px; color: #8b949e; font-size: 0.85rem; }
+.district-grid {
+  display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px;
+}
+.district-pick-card {
+  background: #0d1117; border: 1px solid #30363d; border-radius: 10px;
+  padding: 14px 12px; cursor: pointer; text-align: center; transition: all .15s;
+}
+.district-pick-card:hover {
+  border-color: #58a6ff; background: rgba(88,166,255,0.08);
+}
+.pick-name { font-size: 1rem; font-weight: 600; color: #e6edf3; }
+.pick-en { font-size: 0.75rem; color: #8b949e; margin-top: 2px; }
+.picker-skip { text-align: center; margin-top: 16px; }
+.btn-skip {
+  background: transparent; border: 1px solid #30363d; color: #8b949e;
+  padding: 8px 20px; border-radius: 8px; cursor: pointer; font-size: 0.85rem;
+  transition: all .15s;
+}
+.btn-skip:hover { border-color: #58a6ff; color: #58a6ff; }
 
 /* Estate current price */
 .estate-current-price {

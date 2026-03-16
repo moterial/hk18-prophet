@@ -52,11 +52,16 @@ The frontend is an **interactive SVG map of Hong Kong's 18 districts**. Click an
    - 風險與機遇分析
    - 投資建議 (買入/持有/觀望)
 
-🔍 搜尋個別屋苑 → 啟動專項分析
+🔍 搜尋個別屋苑 → 選擇地區 → 啟動專項分析
          │
          ▼
 ┌─────────────────────────────────────────────────┐
 │        Estate Analysis Engine                    │
+│                                                 │
+│  Supports two modes:                            │
+│  • Known estates: select from 180 pre-configured│
+│  • Free-text: type any building name, then      │
+│    pick a district (or let AI auto-detect)      │
 │                                                 │
 │  📊 經濟環境分析員  Economic Environment Agent    │
 │  💰 成交數據分析員  Transaction Analysis Agent    │
@@ -76,7 +81,8 @@ The frontend is an **interactive SVG map of Hong Kong's 18 districts**. Click an
 ### Key Features
 
 - **🗺️ Interactive HK Map** — Full-page SVG map of 18 districts; click to analyze
-- **🔍 Estate Search** — Search 180+ estates by name (English/Chinese); get individual building predictions
+- **🔍 Estate Search** — Search 180+ pre-configured estates by name (English/Chinese), or type **any building name** for free-text analysis
+- **📍 District Picker** — When searching a custom building, choose which district it belongs to for more accurate predictions (or let AI auto-detect)
 - **⚡ On-Demand Analysis** — Only analyzes the district/estate you select (saves tokens)
 - **🔄 Background Processing** — Analysis runs in background; browse other districts while waiting
 - **💾 Smart Caching** — Results cached for 1 hour; instant load on revisit
@@ -261,19 +267,36 @@ Click district on map
 ### Per-Estate Analysis Flow
 
 ```
-Search estate (e.g. "太古城") and select from results
-    │
-    ├─→ 3 Thematic agents analyze sequentially
-    │       (Economic, Transaction, Infrastructure)
-    │
-    └─→ 1 Estate analyst synthesizes detailed report
-            │
-            ├── 1年/5年/10年 price predictions (HK$/sqft)
-            ├── Strengths & weaknesses analysis
-            ├── Comparable estates comparison
-            ├── 3+ news events with sources
-            ├── Risk & opportunity analysis
-            └── Buy/Hold/Wait recommendation with reasoning
+Search estate → Two paths:
+
+  Path A: Known estate (matches one of 180 pre-configured estates)
+    Select from autocomplete dropdown
+        │
+        ├─→ 3 Thematic agents analyze sequentially
+        │       (Economic, Transaction, Infrastructure)
+        │
+        └─→ 1 Estate analyst synthesizes detailed report
+                (with full district profile context)
+
+  Path B: Custom building (any name typed by user)
+    Click "🔎 Analyze [query]" or press Enter
+        │
+        ▼
+    📍 District Picker appears
+        ├─→ User selects a district → full district profile sent to agents
+        └─→ User clicks "Skip" → AI auto-determines district
+        │
+        ├─→ 3 Thematic agents analyze sequentially
+        │       (Economic, Transaction, Infrastructure)
+        │
+        └─→ 1 Estate analyst synthesizes detailed report
+                │
+                ├── 1年/5年/10年 price predictions (HK$/sqft)
+                ├── Strengths & weaknesses analysis
+                ├── Comparable estates comparison
+                ├── 3+ news events with sources
+                ├── Risk & opportunity analysis
+                └── Buy/Hold/Wait recommendation with reasoning
 ```
 
 ---
@@ -321,8 +344,8 @@ Search estate (e.g. "太古城") and select from results
 |--------|----------|-------------|
 | `POST` | `/api/simulation/start` | Start full 18-district simulation |
 | `POST` | `/api/district/:code/analyze` | Start single-district analysis (on-demand) |
-| `GET`  | `/api/estates/search?q=太古城` | Search estates by name (EN/CN) or area |
-| `POST` | `/api/estate/analyze` | Start single-estate analysis |
+| `GET`  | `/api/estates/search?q=太古城` | Search pre-configured estates by name (EN/CN) or area |
+| `POST` | `/api/estate/analyze` | Analyze estate: `{estateName, districtCode}` for known estates, or `{query, districtCode?}` for free-text |
 | `GET`  | `/api/district/:code/status` | Check district analysis status + cached result |
 | `GET`  | `/api/district/statuses` | All district statuses (running/cached/none) |
 | `GET`  | `/api/simulation/:id/status` | Check simulation progress |
@@ -348,6 +371,9 @@ Search estate (e.g. "太古城") and select from results
 - [x] HKD pricing throughout
 - [x] Estate-level predictions (5+ major 屋苑 per district)
 - [x] Individual estate search & analysis (180 estates across 18 districts)
+- [x] Free-text building search (type any building/estate name in Hong Kong)
+- [x] District picker for custom searches (user selects district for higher accuracy)
+- [x] Hybrid search: autocomplete from 180 known estates + free-text for anything else
 - [x] News/policy citations with sources
 - [x] LLM provider agnostic (xAI Grok, OpenAI, Gemini, Groq, Ollama)
 - [ ] Live data scraping (Land Registry, RVD, Centaline)

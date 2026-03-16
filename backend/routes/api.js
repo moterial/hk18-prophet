@@ -1,7 +1,7 @@
 // backend/routes/api.js — REST API routes
 import { Router } from 'express';
 import { config } from '../config.js';
-import { startSimulation, startDistrictSimulation, getSimulationStatus, getCachedDistrictResult, getRunningDistricts } from '../simulation/engine.js';
+import { startSimulation, startDistrictSimulation, startEstateSimulation, getSimulationStatus, getCachedDistrictResult, getCachedEstateResult, getRunningDistricts } from '../simulation/engine.js';
 import { getAgentManifest } from '../agents/index.js';
 import { NewsFetcher } from '../data-sources/news-fetcher.js';
 import {
@@ -157,6 +157,76 @@ apiRouter.get('/districts/status', (req, res) => {
     statuses[code] = { status: 'running', ...info };
   }
   res.json(statuses);
+});
+
+// GET /api/estates/search — Search estates across all districts
+apiRouter.get('/estates/search', (req, res) => {
+  const q = (req.query.q || '').trim().toLowerCase();
+  if (!q || q.length < 2) {
+    return res.json([]);
+  }
+
+  const results = [];
+  for (const d of config.districts) {
+    for (const e of (d.majorEstates || [])) {
+      if (
+        e.name.toLowerCase().includes(q) ||
+        e.nameCn.includes(q) ||
+        e.area.toLowerCase().includes(q)
+      ) {
+        results.push({
+          name: e.name,
+          nameCn: e.nameCn,
+          area: e.area,
+          districtCode: d.code,
+          districtName: d.name,
+          districtNameCn: d.nameCn,
+          region: d.region,
+        });
+      }
+    }
+  }
+  res.json(results);
+});
+
+// POST /api/estate/analyze — Start single-estate analysis
+apiRouter.post('/estate/analyze', async (req, res) => {
+  try {
+    const { estateName, districtCode } = req.body;
+    if (!estateName || !districtCode) {
+      return res.status(400).json({ error: 'estateName and districtCode are required' });
+    }
+
+    const code = districtCode.toUpperCase();
+    const district = config.districts.find(d => d.code === code);
+    if (!district) {
+      return res.status(404).json({ error: 'District not found' });
+    }
+
+    const estate = district.majorEstates.find(e =>
+      e.name.toLowerCase() === estateName.toLowerCase() || e.nameCn === estateName
+    );
+    if (!estate) {
+      return res.status(404).json({ error: 'Estate not found in district' });
+    }
+
+    const estateKey = `${code}:${estate.name}`;
+
+    // Check cache
+    const force = req.query.force === 'true';
+    if (!force) {
+      const cached = getCachedEstateResult(estateKey);
+      if (cached) {
+        return res.json({ cached: true, report: cached.report, simulationId: cached.simulationId });
+      }
+    }
+
+    const result = await startEstateSimulation({ estateName: estate.name, districtCode: code });
+    res.json(result);
+  } catch (err) {
+    console.error('❌ Estate simulation error:', err);
+    res.status(500).json({ error: err.message });
+  }
 });
 
 // POST /api/district/:code/analyze — Start single-district analysis

@@ -18,6 +18,42 @@
       <div class="legend-item"><span class="dot dot-none"></span> Not Analyzed</div>
     </div>
 
+    <!-- Estate Search Bar -->
+    <div class="search-bar">
+      <div class="search-input-wrapper">
+        <span class="search-icon">🔍</span>
+        <input
+          v-model="searchQuery"
+          @input="onSearchInput"
+          @focus="showSearchResults = searchResults.length > 0"
+          @keydown.escape="showSearchResults = false"
+          type="text"
+          placeholder="Search estate / building (e.g. 太古城, Belcher's)..."
+          class="search-input"
+        />
+        <button v-if="searchQuery" class="search-clear" @click="clearSearch">&times;</button>
+      </div>
+      <div v-if="showSearchResults && searchResults.length > 0" class="search-dropdown">
+        <div
+          v-for="item in searchResults"
+          :key="item.name + item.districtCode"
+          class="search-result-item"
+          @click="onEstateSelect(item)"
+        >
+          <div class="search-result-name">
+            <strong>{{ item.nameCn }}</strong>
+            <span class="search-result-en">{{ item.name }}</span>
+          </div>
+          <div class="search-result-meta">
+            📍 {{ item.area }} · {{ item.districtNameCn }} {{ item.districtName }}
+          </div>
+        </div>
+      </div>
+      <div v-if="showSearchResults && searchQuery.length >= 2 && searchResults.length === 0" class="search-dropdown">
+        <div class="search-no-results">No estates found for "{{ searchQuery }}"</div>
+      </div>
+    </div>
+
     <!-- Modal Overlay -->
     <Teleport to="body">
       <div v-if="showModal" class="modal-overlay" @click.self="closeModal">
@@ -133,11 +169,149 @@
         </div>
       </div>
     </Teleport>
+
+    <!-- Estate Report Modal -->
+    <Teleport to="body">
+      <div v-if="showEstateModal" class="modal-overlay" @click.self="closeEstateModal">
+        <div class="modal-container">
+          <button class="modal-close" @click="closeEstateModal">&times;</button>
+
+          <!-- Loading state -->
+          <div v-if="estateLoading" class="modal-loading">
+            <div class="loading-spinner"></div>
+            <h3>Analyzing {{ selectedEstate?.nameCn || selectedEstate?.name }}...</h3>
+            <p class="loading-hint">{{ selectedEstate?.districtNameCn }} · {{ selectedEstate?.area }}</p>
+            <div v-if="estateProgress" class="loading-detail">
+              <div class="status-phase">{{ estateProgress.currentPhase }}</div>
+              <div class="progress-bar">
+                <div class="progress-fill" :style="{ width: estateProgressPercent + '%' }"></div>
+              </div>
+              <div class="status-agents">{{ estateProgress.agentsCompleted || 0 }} / {{ estateProgress.totalAgents || 4 }} agents</div>
+            </div>
+          </div>
+
+          <!-- Estate Report -->
+          <div v-else-if="estateReport" class="modal-result">
+            <div class="modal-header">
+              <div>
+                <h2>{{ estateReport.estateNameCn || estateReport.estateName }} {{ estateReport.estateName }}</h2>
+                <span class="code-badge">{{ estateReport.districtNameCn }} · {{ estateReport.area }}</span>
+              </div>
+              <div class="header-badges">
+                <span class="direction-badge" :class="'dir-' + estateReport.direction">
+                  {{ directionEmoji(estateReport.direction) }} {{ estateReport.direction?.toUpperCase() }}
+                </span>
+                <span class="confidence-badge">{{ ((estateReport.confidence || 0) * 100).toFixed(0) }}% confidence</span>
+                <span class="rec-badge" :class="'rec-' + estateReport.recommendation">{{ estateReport.recommendation }}</span>
+              </div>
+            </div>
+
+            <div class="summary-box">{{ estateReport.summary }}</div>
+
+            <!-- Current Price -->
+            <div v-if="estateReport.currentPricePerSqft" class="estate-current-price">
+              Current Price: <strong>HK${{ estateReport.currentPricePerSqft?.toLocaleString() }}/sqft</strong>
+            </div>
+
+            <!-- Price Predictions -->
+            <div class="predictions-row">
+              <div class="pred-card" v-for="(p, key) in estateReport.predictions" :key="key">
+                <div class="pred-label">{{ formatPeriod(key) }}</div>
+                <div class="pred-change" :class="changeClass(p.change)">{{ p.change }}</div>
+                <div class="pred-range" v-if="p.estimatedPrice">
+                  Est. HK${{ p.estimatedPrice?.toLocaleString() }}/sqft
+                </div>
+                <div class="pred-narrative">{{ p.narrative }}</div>
+              </div>
+            </div>
+
+            <!-- Recommendation -->
+            <div v-if="estateReport.recommendationReasoning" class="summary-box" style="border-left: 3px solid #58a6ff;">
+              <strong>💡 Recommendation:</strong> {{ estateReport.recommendationReasoning }}
+            </div>
+
+            <!-- Strengths & Weaknesses -->
+            <div class="ro-row" v-if="estateReport.strengths?.length || estateReport.weaknesses?.length">
+              <div class="ro-box opp" v-if="estateReport.strengths?.length">
+                <h4>💪 Strengths</h4>
+                <ul><li v-for="s in estateReport.strengths" :key="s">{{ s }}</li></ul>
+              </div>
+              <div class="ro-box risk" v-if="estateReport.weaknesses?.length">
+                <h4>⚠️ Weaknesses</h4>
+                <ul><li v-for="w in estateReport.weaknesses" :key="w">{{ w }}</li></ul>
+              </div>
+            </div>
+
+            <!-- Key Factors -->
+            <div v-if="estateReport.keyFactors?.length" style="margin-bottom:16px;">
+              <h3 class="section-title">📊 Key Factors</h3>
+              <div class="estate-factors">
+                <span v-for="f in estateReport.keyFactors" :key="f" class="factor-tag">{{ f }}</span>
+              </div>
+            </div>
+
+            <!-- Comparable Estates -->
+            <div v-if="estateReport.comparableEstates?.length">
+              <h3 class="section-title">🏘️ Comparable Estates</h3>
+              <div class="estates-grid">
+                <div v-for="comp in estateReport.comparableEstates" :key="comp.name" class="estate-card">
+                  <div class="estate-top">
+                    <div>
+                      <strong>{{ comp.nameCn || comp.name }}</strong>
+                      <span class="estate-en" v-if="comp.nameCn"> {{ comp.name }}</span>
+                    </div>
+                    <span class="code-badge">{{ comp.priceComparison }}</span>
+                  </div>
+                  <div class="news-impact" v-if="comp.note">{{ comp.note }}</div>
+                </div>
+              </div>
+            </div>
+
+            <!-- News & Causes -->
+            <h3 class="section-title" v-if="estateReport.newsCauses?.length">📰 Major News & Causes</h3>
+            <div class="news-list" v-if="estateReport.newsCauses?.length">
+              <div v-for="(news, i) in estateReport.newsCauses" :key="i" class="news-card" :class="'impact-' + news.direction">
+                <div class="news-head">
+                  <span>{{ news.direction === 'positive' ? '🟢' : news.direction === 'negative' ? '🔴' : '🟡' }}</span>
+                  <strong>{{ news.headline }}</strong>
+                </div>
+                <div class="news-meta">
+                  <span>📎 {{ news.source }}</span>
+                  <span>⏱️ {{ news.timeframe }}</span>
+                </div>
+                <div class="news-impact">{{ news.impact }}</div>
+              </div>
+            </div>
+
+            <!-- Risks & Opportunities -->
+            <div class="ro-row" v-if="estateReport.risks?.length || estateReport.opportunities?.length">
+              <div class="ro-box opp" v-if="estateReport.opportunities?.length">
+                <h4>🟢 Opportunities</h4>
+                <ul><li v-for="o in estateReport.opportunities" :key="o">{{ o }}</li></ul>
+              </div>
+              <div class="ro-box risk" v-if="estateReport.risks?.length">
+                <h4>🔴 Risks</h4>
+                <ul><li v-for="r in estateReport.risks" :key="r">{{ r }}</li></ul>
+              </div>
+            </div>
+
+            <button class="btn-reanalyze" @click="reanalyzeEstate">🔄 Re-analyze</button>
+          </div>
+
+          <!-- Error state -->
+          <div v-else class="modal-loading">
+            <div style="font-size:3rem;margin-bottom:12px;">⚠️</div>
+            <h3>Analysis failed for {{ selectedEstate?.nameCn || selectedEstate?.name }}</h3>
+            <button class="btn-retry" @click="reanalyzeEstate">🔄 Retry</button>
+          </div>
+        </div>
+      </div>
+    </Teleport>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, onUnmounted } from 'vue';
+import { ref, reactive, computed, onMounted, onUnmounted } from 'vue';
 import HKMap from '../components/HKMap.vue';
 
 const districts = ref([]);
@@ -146,6 +320,24 @@ const showModal = ref(false);
 const analyzedDistricts = reactive({});  // code -> { direction }
 const runningDistricts = reactive({});   // code -> { simulationId, agentsCompleted, totalAgents, currentPhase }
 const districtReports = reactive({});    // code -> report object
+
+// Estate search state
+const searchQuery = ref('');
+const searchResults = ref([]);
+const showSearchResults = ref(false);
+const selectedEstate = ref(null);
+const showEstateModal = ref(false);
+const estateLoading = ref(false);
+const estateReport = ref(null);
+const estateProgress = ref(null);
+const estateSimulationId = ref(null);
+let estateSearchTimeout = null;
+let estatePollInterval = null;
+
+const estateProgressPercent = computed(() => {
+  if (!estateProgress.value || !estateProgress.value.totalAgents) return 0;
+  return Math.round((estateProgress.value.agentsCompleted / estateProgress.value.totalAgents) * 100);
+});
 
 // Track polling intervals per district (multiple can run)
 const pollIntervals = {};
@@ -299,6 +491,126 @@ async function loadReport(simulationId, districtCode) {
   } catch { /* */ }
 }
 
+// ── Estate Search Functions ──
+
+function onSearchInput() {
+  clearTimeout(estateSearchTimeout);
+  if (searchQuery.value.length < 2) {
+    searchResults.value = [];
+    showSearchResults.value = false;
+    return;
+  }
+  estateSearchTimeout = setTimeout(async () => {
+    try {
+      const res = await fetch(`/api/estates/search?q=${encodeURIComponent(searchQuery.value)}`);
+      searchResults.value = await res.json();
+      showSearchResults.value = true;
+    } catch { searchResults.value = []; }
+  }, 250);
+}
+
+function clearSearch() {
+  searchQuery.value = '';
+  searchResults.value = [];
+  showSearchResults.value = false;
+}
+
+async function onEstateSelect(estate) {
+  selectedEstate.value = estate;
+  showSearchResults.value = false;
+  showEstateModal.value = true;
+  estateLoading.value = true;
+  estateReport.value = null;
+  estateProgress.value = null;
+
+  try {
+    const res = await fetch('/api/estate/analyze', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ estateName: estate.name, districtCode: estate.districtCode }),
+    });
+    const data = await res.json();
+
+    if (data.cached && data.report) {
+      estateReport.value = data.report;
+      estateLoading.value = false;
+      return;
+    }
+
+    if (data.simulationId) {
+      estateSimulationId.value = data.simulationId;
+      startEstatePoll(data.simulationId);
+    }
+  } catch {
+    estateLoading.value = false;
+  }
+}
+
+function startEstatePoll(simulationId) {
+  if (estatePollInterval) clearInterval(estatePollInterval);
+  estatePollInterval = setInterval(async () => {
+    try {
+      const res = await fetch(`/api/simulation/${simulationId}/status`);
+      const data = await res.json();
+      estateProgress.value = {
+        agentsCompleted: data.agentsCompleted || 0,
+        totalAgents: data.totalAgents || 4,
+        currentPhase: data.currentPhase || 'Analyzing...',
+      };
+      if (data.status === 'completed') {
+        clearInterval(estatePollInterval);
+        estatePollInterval = null;
+        const reportRes = await fetch(`/api/simulation/${simulationId}/report`);
+        const reportData = await reportRes.json();
+        if (reportData.report) {
+          estateReport.value = reportData.report;
+        }
+        estateLoading.value = false;
+      } else if (data.status === 'failed') {
+        clearInterval(estatePollInterval);
+        estatePollInterval = null;
+        estateLoading.value = false;
+      }
+    } catch { /* retry */ }
+  }, 1500);
+}
+
+function closeEstateModal() {
+  showEstateModal.value = false;
+  selectedEstate.value = null;
+  estateReport.value = null;
+  estateLoading.value = false;
+  if (estatePollInterval) { clearInterval(estatePollInterval); estatePollInterval = null; }
+}
+
+async function reanalyzeEstate() {
+  if (!selectedEstate.value) return;
+  estateLoading.value = true;
+  estateReport.value = null;
+  estateProgress.value = null;
+  try {
+    const res = await fetch('/api/estate/analyze?force=true', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ estateName: selectedEstate.value.name, districtCode: selectedEstate.value.districtCode }),
+    });
+    const data = await res.json();
+    if (data.simulationId) {
+      estateSimulationId.value = data.simulationId;
+      startEstatePoll(data.simulationId);
+    }
+  } catch {
+    estateLoading.value = false;
+  }
+}
+
+// ── Click outside to close search ──
+function onClickOutsideSearch(e) {
+  if (!e.target.closest('.search-bar')) {
+    showSearchResults.value = false;
+  }
+}
+
 async function loadDistricts() {
   try {
     const res = await fetch('/api/districts');
@@ -329,12 +641,15 @@ async function loadExistingStatuses() {
 onMounted(() => {
   loadDistricts();
   loadExistingStatuses();
+  document.addEventListener('click', onClickOutsideSearch);
 });
 
 onUnmounted(() => {
   for (const key of Object.keys(pollIntervals)) {
     clearInterval(pollIntervals[key]);
   }
+  if (estatePollInterval) clearInterval(estatePollInterval);
+  document.removeEventListener('click', onClickOutsideSearch);
 });
 </script>
 
@@ -345,6 +660,83 @@ onUnmounted(() => {
   height: calc(100vh - 58px);
   overflow: hidden;
   background: #0a0e17;
+}
+
+/* Search Bar */
+.search-bar {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 420px;
+  max-width: calc(100vw - 32px);
+  z-index: 20;
+}
+.search-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+.search-icon {
+  position: absolute;
+  left: 12px;
+  font-size: 0.9rem;
+  pointer-events: none;
+}
+.search-input {
+  width: 100%;
+  padding: 10px 36px 10px 36px;
+  background: rgba(13,17,23,0.95);
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  color: #f0f6fc;
+  font-size: 0.85rem;
+  outline: none;
+  backdrop-filter: blur(8px);
+}
+.search-input::placeholder { color: #484f58; }
+.search-input:focus { border-color: #58a6ff; box-shadow: 0 0 0 2px rgba(88,166,255,0.15); }
+.search-clear {
+  position: absolute;
+  right: 8px;
+  background: none;
+  border: none;
+  color: #8b949e;
+  font-size: 1.2rem;
+  cursor: pointer;
+  padding: 2px 6px;
+}
+.search-clear:hover { color: #f0f6fc; }
+.search-dropdown {
+  margin-top: 4px;
+  background: rgba(13,17,23,0.97);
+  border: 1px solid #30363d;
+  border-radius: 10px;
+  max-height: 320px;
+  overflow-y: auto;
+  backdrop-filter: blur(8px);
+}
+.search-result-item {
+  padding: 10px 14px;
+  cursor: pointer;
+  border-bottom: 1px solid #21262d;
+}
+.search-result-item:last-child { border-bottom: none; }
+.search-result-item:hover { background: #161b22; }
+.search-result-name strong { color: #f0f6fc; font-size: 0.9rem; }
+.search-result-en { color: #8b949e; font-size: 0.8rem; margin-left: 6px; }
+.search-result-meta { font-size: 0.75rem; color: #8b949e; margin-top: 2px; }
+.search-no-results { padding: 14px; text-align: center; color: #484f58; font-size: 0.85rem; }
+
+/* Estate current price */
+.estate-current-price {
+  background: #161b22;
+  border: 1px solid #30363d;
+  border-radius: 8px;
+  padding: 10px 14px;
+  margin-bottom: 16px;
+  color: #c9d1d9;
+  font-size: 0.95rem;
 }
 
 .map-legend {

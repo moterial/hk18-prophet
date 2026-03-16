@@ -1,6 +1,6 @@
 // backend/simulation/engine.js — Core simulation loop: thematic → district → moderator
 import { v4 as uuidv4 } from 'uuid';
-import { createAgentTeam, createSingleDistrictTeam } from '../agents/index.js';
+import { createAgentTeam, createSingleDistrictTeam, createEstateTeam } from '../agents/index.js';
 import { config } from '../config.js';
 import { saveSimulationMemory, savePredictionMemory, getMemoryContext } from './memory-store.js';
 import { saveSimulation, updateSimulationStatus, saveDistrictPredictions } from '../db/database.js';
@@ -332,4 +332,130 @@ async function runDistrictSimulation(simulationId, district, predictionQuery) {
   return moderatorResult.result;
 }
 
-export default { startSimulation, startDistrictSimulation, getSimulationStatus, getRunningDistricts };
+// ── Single-estate simulation (lightweight: 3 thematic + 1 estate analyst = 4 LLM calls) ──
+
+const estateCache = new Map();
+
+export function getCachedEstateResult(estateKey) {
+  const cached = estateCache.get(estateKey);
+  if (!cached) return null;
+  if (Date.now() - cached.timestamp > CACHE_TTL) {
+    estateCache.delete(estateKey);
+    return null;
+  }
+  return cached;
+}
+
+export async function startEstateSimulation({ estateName, districtCode }) {
+  const district = config.districts.find(d => d.code === districtCode.toUpperCase());
+  if (!district) throw new Error(`Unknown district code: ${districtCode}`);
+
+  const estate = district.majorEstates.find(e =>
+    e.name.toLowerCase() === estateName.toLowerCase() ||
+    e.nameCn === estateName
+  );
+  if (!estate) throw new Error(`Estate not found in district ${districtCode}: ${estateName}`);
+
+  const estateKey = `${district.code}:${estate.name}`;
+  const simulationId = uuidv4();
+  const predictionQuery = `Provide an in-depth prediction report for ${estate.name} (${estate.nameCn}) in ${district.name} (${district.nameCn}). Include detailed price predictions for 1 year, 5 years, and 10 years, key factors, risks, opportunities, comparable estates, and relevant news.`;
+
+  const status = {
+    id: simulationId,
+    status: 'starting',
+    estateKey,
+    estateName: estate.name,
+    districtCode: district.code,
+    districtName: district.name,
+    currentRound: 0,
+    totalRounds: 1,
+    currentPhase: 'initializing',
+    agentsCompleted: 0,
+    totalAgents: 0,
+    transcript: [],
+    report: null,
+    startedAt: new Date().toISOString(),
+    completedAt: null,
+    error: null,
+  };
+
+  activeSimulations.set(simulationId, status);
+
+  saveSimulation({
+    id: simulationId,
+    status: 'running',
+    rounds: 1,
+    seedData: JSON.stringify({ estateKey, estateName: estate.name, districtCode: district.code }),
+    predictionQuery,
+  });
+
+  runEstateSimulation(simulationId, estate, district, predictionQuery).catch(err => {
+    console.error(`❌ Estate simulation ${simulationId} failed:`, err);
+    status.status = 'failed';
+    status.error = err.message;
+    updateSimulationStatus(simulationId, 'failed');
+  });
+
+  return { simulationId, status: 'started', estateKey };
+}
+
+async function runEstateSimulation(simulationId, estate, district, predictionQuery) {
+  const status = activeSimulations.get(simulationId);
+  status.status = 'running';
+
+  const { thematicAgents, estateAgent } = createEstateTeam(estate, district);
+  status.totalAgents = thematicAgents.length + 1;
+
+  const memoryCtx = getMemoryContext();
+  const basePrompt = `${predictionQuery}\n${memoryCtx}`;
+
+  // Phase 1: Run 3 key thematic agents sequentially
+  status.currentRound = 1;
+  status.currentPhase = 'Thematic Analysis';
+  console.log(`\n🏠 Estate simulation for ${estate.name} (${district.name}) — Thematic agents...`);
+
+  const thematicResults = [];
+  for (const agent of thematicAgents) {
+    console.log(`    🤖 ${agent.name}...`);
+    const result = await agent.analyze(basePrompt, '');
+    thematicResults.push(result);
+    status.agentsCompleted += 1;
+    console.log(`    ✅ ${agent.name} done`);
+    if (agent !== thematicAgents[thematicAgents.length - 1]) {
+      await sleep(DELAY_BETWEEN_AGENTS);
+    }
+  }
+
+  // Phase 2: Estate analyst synthesizes
+  status.currentPhase = 'Estate Analysis';
+  console.log(`  🏠 Estate analyst: ${estate.name}...`);
+
+  const thematicSummary = thematicResults.map(r =>
+    `[${r.role}] ${r.result.analysis || 'No analysis'}`
+  ).join('\n\n');
+  const estateContext = `\n--- Thematic Agent Views ---\n${thematicSummary}`;
+
+  await sleep(DELAY_BETWEEN_AGENTS);
+  const estateResult = await estateAgent.analyze(basePrompt, estateContext);
+  status.agentsCompleted += 1;
+
+  status.report = estateResult.result;
+  status.status = 'completed';
+  status.completedAt = new Date().toISOString();
+  status.currentPhase = 'Complete';
+
+  // Cache the result
+  const estateKey = `${district.code}:${estate.name}`;
+  estateCache.set(estateKey, { report: estateResult.result, timestamp: Date.now(), simulationId });
+
+  try {
+    updateSimulationStatus(simulationId, 'completed');
+  } catch (err) {
+    console.error('⚠️ DB save error:', err.message);
+  }
+
+  console.log(`\n✅ Estate simulation for ${estate.name} completed!`);
+  return estateResult.result;
+}
+
+export default { startSimulation, startDistrictSimulation, startEstateSimulation, getSimulationStatus, getRunningDistricts };

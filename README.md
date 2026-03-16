@@ -8,8 +8,9 @@
 <p align="center">
   <img src="https://img.shields.io/badge/node-%3E%3D18-green" />
   <img src="https://img.shields.io/badge/license-All%20Rights%20Reserved-red" />
-  <img src="https://img.shields.io/badge/agents-9%20types-orange" />
+  <img src="https://img.shields.io/badge/agents-10%20types-orange" />
   <img src="https://img.shields.io/badge/districts-18-red" />
+  <img src="https://img.shields.io/badge/estates-180-blue" />
   <img src="https://img.shields.io/badge/language-繁體中文-yellow" />
 </p>
 
@@ -50,12 +51,33 @@ The frontend is an **interactive SVG map of Hong Kong's 18 districts**. Click an
    - 影響因素及新聞來源 (≥4條新聞)
    - 風險與機遇分析
    - 投資建議 (買入/持有/觀望)
+
+🔍 搜尋個別屋苑 → 啟動專項分析
+         │
+         ▼
+┌─────────────────────────────────────────────────┐
+│        Estate Analysis Engine                    │
+│                                                 │
+│  📊 經濟環境分析員  Economic Environment Agent    │
+│  💰 成交數據分析員  Transaction Analysis Agent    │
+│  🚇 基建發展分析員  Infrastructure Agent          │
+│  🏠 屋苑專項分析員  Estate Analyst Agent          │
+└─────────────────────────────────────────────────┘
+         │
+         ▼
+📋 屋苑專項報告 Estate Prediction Report
+   - 1年 / 5年 / 10年樓價走勢
+   - 強弱項分析
+   - 可比較屋苑
+   - 新聞及政策影響
+   - 投資建議及詳細理由
 ```
 
 ### Key Features
 
 - **🗺️ Interactive HK Map** — Full-page SVG map of 18 districts; click to analyze
-- **⚡ On-Demand Analysis** — Only analyzes the district you click (saves tokens)
+- **🔍 Estate Search** — Search 180+ estates by name (English/Chinese); get individual building predictions
+- **⚡ On-Demand Analysis** — Only analyzes the district/estate you select (saves tokens)
 - **🔄 Background Processing** — Analysis runs in background; browse other districts while waiting
 - **💾 Smart Caching** — Results cached for 1 hour; instant load on revisit
 - **🤖 Multi-Agent Debate** — 8 specialized agents debate and synthesize predictions
@@ -82,6 +104,7 @@ hk18-prophet/
 │   │   ├── district-agent.js        # District specialist with deep local knowledge
 │   │   ├── moderator-agent.js       # Full 18-district moderator
 │   │   ├── district-moderator-agent.js  # Single-district focused moderator
+│   │   ├── estate-agent.js              # Single-estate focused analyst
 │   │   └── index.js                 # Agent registry & team creation
 │   ├── simulation/
 │   │   ├── engine.js                # Simulation loop + per-district analysis + caching
@@ -213,7 +236,8 @@ NEWS_API_KEY=your_newsapi_key
 | 🇨🇳 China Policy | 中國政策分析 | GBA integration, capital flows, talent schemes |
 | 🏘️ District Specialist | 地區專家 | Deep local knowledge per district |
 | 🎯 District Moderator | 地區綜合分析 | Synthesizes all views into single-district report |
-| 🎯 Moderator | 全局綜合分析 | Synthesizes all views across all 18 districts |
+| � Estate Analyst | 屋苑專項分析 | Deep analysis of a single estate/building |
+| �🎯 Moderator | 全局綜合分析 | Synthesizes all views across all 18 districts |
 
 ### Per-District Analysis Flow
 
@@ -232,6 +256,24 @@ Click district on map
             ├── 4+ news events with sources
             ├── Risk & opportunity analysis
             └── Buy/Hold/Wait recommendations
+```
+
+### Per-Estate Analysis Flow
+
+```
+Search estate (e.g. "太古城") and select from results
+    │
+    ├─→ 3 Thematic agents analyze sequentially
+    │       (Economic, Transaction, Infrastructure)
+    │
+    └─→ 1 Estate analyst synthesizes detailed report
+            │
+            ├── 1年/5年/10年 price predictions (HK$/sqft)
+            ├── Strengths & weaknesses analysis
+            ├── Comparable estates comparison
+            ├── 3+ news events with sources
+            ├── Risk & opportunity analysis
+            └── Buy/Hold/Wait recommendation with reasoning
 ```
 
 ---
@@ -279,6 +321,8 @@ Click district on map
 |--------|----------|-------------|
 | `POST` | `/api/simulation/start` | Start full 18-district simulation |
 | `POST` | `/api/district/:code/analyze` | Start single-district analysis (on-demand) |
+| `GET`  | `/api/estates/search?q=太古城` | Search estates by name (EN/CN) or area |
+| `POST` | `/api/estate/analyze` | Start single-estate analysis |
 | `GET`  | `/api/district/:code/status` | Check district analysis status + cached result |
 | `GET`  | `/api/district/statuses` | All district statuses (running/cached/none) |
 | `GET`  | `/api/simulation/:id/status` | Check simulation progress |
@@ -303,6 +347,7 @@ Click district on map
 - [x] Traditional Chinese (繁體中文) reports
 - [x] HKD pricing throughout
 - [x] Estate-level predictions (5+ major 屋苑 per district)
+- [x] Individual estate search & analysis (180 estates across 18 districts)
 - [x] News/policy citations with sources
 - [x] LLM provider agnostic (xAI Grok, OpenAI, Gemini, Groq, Ollama)
 - [ ] Live data scraping (Land Registry, RVD, Centaline)

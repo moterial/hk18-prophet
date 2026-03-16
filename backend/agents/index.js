@@ -8,6 +8,7 @@ import { ChinaPolicyAgent } from './china-policy-agent.js';
 import { DistrictAgent, createDistrictAgents } from './district-agent.js';
 import { ModeratorAgent } from './moderator-agent.js';
 import { DistrictModeratorAgent } from './district-moderator-agent.js';
+import { EstateAgent } from './estate-agent.js';
 import { config } from '../config.js';
 
 const THEMATIC_AGENTS = [
@@ -33,6 +34,17 @@ export function createSingleDistrictTeam(district) {
   const moderator = new DistrictModeratorAgent(district);
 
   return { thematicAgents, districtAgent, moderator };
+}
+
+export function createEstateTeam(estate, district) {
+  // Use a subset of thematic agents for speed: economic, transaction, infrastructure
+  const selectedThematic = ['economic', 'transaction', 'infrastructure'];
+  const thematicAgents = THEMATIC_AGENTS
+    .filter(a => selectedThematic.includes(a.id))
+    .map(a => new a.Class());
+  const estateAgent = new EstateAgent(estate, district);
+
+  return { thematicAgents, estateAgent };
 }
 
 export function getAgentManifest() {

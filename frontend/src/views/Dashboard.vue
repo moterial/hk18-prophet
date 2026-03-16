@@ -18,6 +18,45 @@
       <div class="legend-item"><span class="dot dot-none"></span> Not Analyzed</div>
     </div>
 
+    <!-- Background Estate Tasks Indicator -->
+    <div v-if="bgEstateTaskCount > 0" class="bg-tasks-panel">
+      <div class="bg-tasks-header" @click="bgTasksExpanded = !bgTasksExpanded">
+        <div class="bg-tasks-indicator">
+          <span class="bg-spinner"></span>
+          <span>{{ bgEstateRunningCount }} generating</span>
+        </div>
+        <span class="bg-tasks-toggle">{{ bgTasksExpanded ? '▾' : '▸' }} {{ bgEstateTaskCount }}</span>
+      </div>
+      <div v-if="bgTasksExpanded" class="bg-tasks-list">
+        <div
+          v-for="task in bgEstateTasks"
+          :key="task.id"
+          class="bg-task-item"
+          :class="{ 'bg-task-done': task.status === 'completed', 'bg-task-fail': task.status === 'failed' }"
+          @click="openBgEstateReport(task)"
+        >
+          <span class="bg-task-icon">
+            {{ task.status === 'completed' ? '✅' : task.status === 'failed' ? '❌' : '⏳' }}
+          </span>
+          <span class="bg-task-name">{{ task.name }}</span>
+          <span v-if="task.status === 'running'" class="bg-task-phase">{{ task.phase }}</span>
+          <span v-if="task.status === 'completed'" class="bg-task-open">View →</span>
+        </div>
+      </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <Transition name="toast">
+      <div v-if="toastVisible" class="toast-notification" @click="onToastClick">
+        <span class="toast-icon">✅</span>
+        <div class="toast-body">
+          <div class="toast-title">{{ toastTitle }}</div>
+          <div class="toast-subtitle">{{ toastSubtitle }}</div>
+        </div>
+        <button class="toast-close" @click.stop="toastVisible = false">&times;</button>
+      </div>
+    </Transition>
+
     <!-- Estate Search Bar -->
     <div class="search-bar">
       <div class="search-input-wrapper">
@@ -363,7 +402,34 @@ const estateReport = ref(null);
 const estateProgress = ref(null);
 const estateSimulationId = ref(null);
 let estateSearchTimeout = null;
-let estatePollInterval = null;
+
+// Background estate tasks — persist across modal close
+const bgEstateTasks = reactive([]);  // { id, name, simulationId, estate, status, phase, report }
+const bgTasksExpanded = ref(false);
+const bgEstateTaskCount = computed(() => bgEstateTasks.length);
+const bgEstateRunningCount = computed(() => bgEstateTasks.filter(t => t.status === 'running').length);
+const bgPollIntervals = {};  // id -> interval
+
+// Toast notification
+const toastVisible = ref(false);
+const toastTitle = ref('');
+const toastSubtitle = ref('');
+let toastClickAction = null;
+let toastTimer = null;
+
+function showToast(title, subtitle, onClick) {
+  toastTitle.value = title;
+  toastSubtitle.value = subtitle;
+  toastClickAction = onClick;
+  toastVisible.value = true;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { toastVisible.value = false; }, 8000);
+}
+
+function onToastClick() {
+  toastVisible.value = false;
+  if (toastClickAction) toastClickAction();
+}
 
 // District picker state (for custom search)
 const showDistrictPicker = ref(false);
@@ -574,10 +640,30 @@ function onDistrictPicked(district) {
 async function onEstateSelect(estate) {
   selectedEstate.value = estate;
   showSearchResults.value = false;
-  showEstateModal.value = true;
-  estateLoading.value = true;
   estateReport.value = null;
   estateProgress.value = null;
+
+  // Check if there's already a background task for this estate
+  const existingTask = bgEstateTasks.find(t =>
+    t.estate.name === estate.name && t.estate.districtCode === estate.districtCode
+  );
+  if (existingTask) {
+    if (existingTask.status === 'completed' && existingTask.report) {
+      estateReport.value = existingTask.report;
+      estateLoading.value = false;
+      showEstateModal.value = true;
+      return;
+    }
+    // Still running — open modal in loading state and resume tracking
+    estateSimulationId.value = existingTask.simulationId;
+    estateLoading.value = true;
+    showEstateModal.value = true;
+    trackEstateFromBg(existingTask);
+    return;
+  }
+
+  showEstateModal.value = true;
+  estateLoading.value = true;
 
   try {
     const payload = estate.isCustom
@@ -598,48 +684,114 @@ async function onEstateSelect(estate) {
 
     if (data.simulationId) {
       estateSimulationId.value = data.simulationId;
-      startEstatePoll(data.simulationId);
+      // Register as background task
+      const taskId = data.simulationId;
+      const task = reactive({
+        id: taskId,
+        name: estate.nameCn || estate.name,
+        simulationId: data.simulationId,
+        estate: { ...estate },
+        status: 'running',
+        phase: 'Starting...',
+        report: null,
+      });
+      bgEstateTasks.unshift(task);
+      startBgEstatePoll(task);
     }
   } catch {
     estateLoading.value = false;
   }
 }
 
-function startEstatePoll(simulationId) {
-  if (estatePollInterval) clearInterval(estatePollInterval);
-  estatePollInterval = setInterval(async () => {
+function trackEstateFromBg(task) {
+  // Sync bg task progress to the modal's progress display
+  const syncInterval = setInterval(() => {
+    estateProgress.value = { agentsCompleted: 0, totalAgents: 4, currentPhase: task.phase };
+    if (task.status === 'completed') {
+      clearInterval(syncInterval);
+      estateReport.value = task.report;
+      estateLoading.value = false;
+    } else if (task.status === 'failed') {
+      clearInterval(syncInterval);
+      estateLoading.value = false;
+    }
+  }, 500);
+}
+
+function startBgEstatePoll(task) {
+  if (bgPollIntervals[task.id]) clearInterval(bgPollIntervals[task.id]);
+  bgPollIntervals[task.id] = setInterval(async () => {
     try {
-      const res = await fetch(`/api/simulation/${simulationId}/status`);
+      const res = await fetch(`/api/simulation/${task.simulationId}/status`);
       const data = await res.json();
-      estateProgress.value = {
-        agentsCompleted: data.agentsCompleted || 0,
-        totalAgents: data.totalAgents || 4,
-        currentPhase: data.currentPhase || 'Analyzing...',
-      };
+      task.phase = data.currentPhase || 'Analyzing...';
+
+      // Also update modal progress if this task is currently viewed
+      if (estateSimulationId.value === task.simulationId && showEstateModal.value) {
+        estateProgress.value = {
+          agentsCompleted: data.agentsCompleted || 0,
+          totalAgents: data.totalAgents || 4,
+          currentPhase: data.currentPhase || 'Analyzing...',
+        };
+      }
+
       if (data.status === 'completed') {
-        clearInterval(estatePollInterval);
-        estatePollInterval = null;
-        const reportRes = await fetch(`/api/simulation/${simulationId}/report`);
+        clearInterval(bgPollIntervals[task.id]);
+        delete bgPollIntervals[task.id];
+        const reportRes = await fetch(`/api/simulation/${task.simulationId}/report`);
         const reportData = await reportRes.json();
-        if (reportData.report) {
-          estateReport.value = reportData.report;
+        task.report = reportData.report || null;
+        task.status = 'completed';
+
+        // Update modal if still viewing this task
+        if (estateSimulationId.value === task.simulationId && showEstateModal.value) {
+          estateReport.value = task.report;
+          estateLoading.value = false;
         }
-        estateLoading.value = false;
+
+        // Show toast if modal is closed
+        if (!showEstateModal.value || estateSimulationId.value !== task.simulationId) {
+          showToast(
+            `${task.name} report ready`,
+            'Click to view the prediction report',
+            () => openBgEstateReport(task)
+          );
+        }
       } else if (data.status === 'failed') {
-        clearInterval(estatePollInterval);
-        estatePollInterval = null;
-        estateLoading.value = false;
+        clearInterval(bgPollIntervals[task.id]);
+        delete bgPollIntervals[task.id];
+        task.status = 'failed';
+        if (estateSimulationId.value === task.simulationId && showEstateModal.value) {
+          estateLoading.value = false;
+        }
       }
     } catch { /* retry */ }
   }, 1500);
 }
 
+function openBgEstateReport(task) {
+  if (task.status === 'completed' && task.report) {
+    selectedEstate.value = task.estate;
+    estateReport.value = task.report;
+    estateLoading.value = false;
+    estateSimulationId.value = task.simulationId;
+    showEstateModal.value = true;
+  } else if (task.status === 'running') {
+    selectedEstate.value = task.estate;
+    estateSimulationId.value = task.simulationId;
+    estateLoading.value = true;
+    estateReport.value = null;
+    showEstateModal.value = true;
+    trackEstateFromBg(task);
+  }
+}
+
 function closeEstateModal() {
   showEstateModal.value = false;
+  // Don't clear simulation or stop polling — keep running in background
   selectedEstate.value = null;
   estateReport.value = null;
   estateLoading.value = false;
-  if (estatePollInterval) { clearInterval(estatePollInterval); estatePollInterval = null; }
 }
 
 async function reanalyzeEstate() {
@@ -659,7 +811,28 @@ async function reanalyzeEstate() {
     const data = await res.json();
     if (data.simulationId) {
       estateSimulationId.value = data.simulationId;
-      startEstatePoll(data.simulationId);
+      // Remove old task for same estate, add fresh one
+      const idx = bgEstateTasks.findIndex(t =>
+        t.estate.name === selectedEstate.value.name && t.estate.districtCode === selectedEstate.value.districtCode
+      );
+      if (idx >= 0) {
+        if (bgPollIntervals[bgEstateTasks[idx].id]) {
+          clearInterval(bgPollIntervals[bgEstateTasks[idx].id]);
+          delete bgPollIntervals[bgEstateTasks[idx].id];
+        }
+        bgEstateTasks.splice(idx, 1);
+      }
+      const task = reactive({
+        id: data.simulationId,
+        name: selectedEstate.value.nameCn || selectedEstate.value.name,
+        simulationId: data.simulationId,
+        estate: { ...selectedEstate.value },
+        status: 'running',
+        phase: 'Starting...',
+        report: null,
+      });
+      bgEstateTasks.unshift(task);
+      startBgEstatePoll(task);
     }
   } catch {
     estateLoading.value = false;
@@ -710,7 +883,10 @@ onUnmounted(() => {
   for (const key of Object.keys(pollIntervals)) {
     clearInterval(pollIntervals[key]);
   }
-  if (estatePollInterval) clearInterval(estatePollInterval);
+  for (const key of Object.keys(bgPollIntervals)) {
+    clearInterval(bgPollIntervals[key]);
+  }
+  clearTimeout(toastTimer);
   document.removeEventListener('click', onClickOutsideSearch);
 });
 </script>
@@ -820,6 +996,64 @@ onUnmounted(() => {
   transition: all .15s;
 }
 .btn-skip:hover { border-color: #58a6ff; color: #58a6ff; }
+
+/* Background Tasks Panel */
+.bg-tasks-panel {
+  position: absolute; top: 16px; right: 16px;
+  background: rgba(13,17,23,0.95); border: 1px solid #30363d;
+  border-radius: 10px; min-width: 220px; z-index: 20;
+  backdrop-filter: blur(8px);
+}
+.bg-tasks-header {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 8px 12px; cursor: pointer; user-select: none;
+}
+.bg-tasks-indicator { display: flex; align-items: center; gap: 6px; color: #d29922; font-size: 0.8rem; font-weight: 600; }
+.bg-spinner {
+  width: 12px; height: 12px; border: 2px solid #30363d;
+  border-top: 2px solid #d29922; border-radius: 50%;
+  animation: spin 1s linear infinite; display: inline-block;
+}
+.bg-tasks-toggle { color: #8b949e; font-size: 0.75rem; }
+.bg-tasks-list { border-top: 1px solid #21262d; max-height: 240px; overflow-y: auto; }
+.bg-task-item {
+  display: flex; align-items: center; gap: 6px;
+  padding: 8px 12px; font-size: 0.8rem; color: #c9d1d9;
+  cursor: pointer; border-bottom: 1px solid #21262d;
+}
+.bg-task-item:last-child { border-bottom: none; }
+.bg-task-item:hover { background: #161b22; }
+.bg-task-done { color: #3fb950; }
+.bg-task-fail { color: #f85149; }
+.bg-task-icon { font-size: 0.85rem; flex-shrink: 0; }
+.bg-task-name { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bg-task-phase { color: #8b949e; font-size: 0.7rem; flex-shrink: 0; }
+.bg-task-open { color: #58a6ff; font-size: 0.75rem; flex-shrink: 0; }
+
+/* Toast Notification */
+.toast-notification {
+  position: fixed; bottom: 24px; right: 24px; z-index: 2000;
+  background: #161b22; border: 1px solid #3fb950;
+  border-radius: 10px; padding: 12px 16px;
+  display: flex; align-items: center; gap: 10px;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.5); cursor: pointer;
+  max-width: 360px;
+}
+.toast-icon { font-size: 1.4rem; flex-shrink: 0; }
+.toast-body { flex: 1; }
+.toast-title { color: #f0f6fc; font-size: 0.85rem; font-weight: 600; }
+.toast-subtitle { color: #8b949e; font-size: 0.75rem; margin-top: 2px; }
+.toast-close {
+  background: none; border: none; color: #8b949e;
+  font-size: 1.2rem; cursor: pointer; padding: 0 2px; flex-shrink: 0;
+}
+.toast-close:hover { color: #f0f6fc; }
+.toast-enter-active { animation: toast-in 0.3s ease; }
+.toast-leave-active { animation: toast-in 0.3s ease reverse; }
+@keyframes toast-in {
+  from { transform: translateX(100%); opacity: 0; }
+  to { transform: translateX(0); opacity: 1; }
+}
 
 /* Estate current price */
 .estate-current-price {

@@ -7,7 +7,7 @@ export class ScraperBase {
     this.name = name;
   }
 
-  fetch(url, options = {}) {
+  fetch(url, options = {}, _redirects = 0) {
     return new Promise((resolve, reject) => {
       const parsedUrl = new URL(url);
       const client = parsedUrl.protocol === 'https:' ? https : http;
@@ -19,6 +19,12 @@ export class ScraperBase {
         },
         timeout: options.timeout || 15000,
       }, (res) => {
+        // Follow redirects (301, 302, 307, 308) up to 5 times
+        if ([301, 302, 307, 308].includes(res.statusCode) && res.headers.location && _redirects < 5) {
+          const redirectUrl = new URL(res.headers.location, url).toString();
+          this.fetch(redirectUrl, options, _redirects + 1).then(resolve, reject);
+          return;
+        }
         if (res.statusCode < 200 || res.statusCode >= 300) {
           reject(new Error(`HTTP ${res.statusCode} from ${url}`));
           return;

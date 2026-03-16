@@ -4,6 +4,7 @@ import { config } from '../config.js';
 import { startSimulation, startDistrictSimulation, startEstateSimulation, getSimulationStatus, getCachedDistrictResult, getCachedEstateResult, getRunningDistricts } from '../simulation/engine.js';
 import { getAgentManifest } from '../agents/index.js';
 import { NewsFetcher } from '../data-sources/news-fetcher.js';
+import { ragStats } from '../data-sources/rag-store.js';
 import {
   getSimulation,
   listSimulations,
@@ -13,6 +14,12 @@ import {
 
 export const apiRouter = Router();
 const newsFetcher = new NewsFetcher();
+
+// RAG stats
+apiRouter.get('/rag/stats', async (req, res) => {
+  const stats = await ragStats();
+  res.json(stats);
+});
 
 // POST /api/simulation/start — Start a new simulation
 apiRouter.post('/simulation/start', async (req, res) => {

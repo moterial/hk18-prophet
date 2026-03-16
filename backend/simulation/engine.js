@@ -4,6 +4,7 @@ import { createAgentTeam, createSingleDistrictTeam, createEstateTeam } from '../
 import { config } from '../config.js';
 import { saveSimulationMemory, savePredictionMemory, getMemoryContext } from './memory-store.js';
 import { saveSimulation, updateSimulationStatus, saveDistrictPredictions } from '../db/database.js';
+import { ragRetrieve } from '../data-sources/rag-store.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const DELAY_BETWEEN_AGENTS = parseInt(process.env.DELAY_BETWEEN_AGENTS || '1000', 10); // 1s default (Grok/OpenAI have generous limits)
@@ -94,8 +95,9 @@ async function runSimulation(simulationId, { seedData, predictionQuery, rounds }
   status.totalAgents = thematicAgents.length + districtAgents.length + 1;
 
   const memoryCtx = getMemoryContext();
+  const ragCtx = await ragRetrieve(predictionQuery);
   const seedContext = seedData ? `\n--- Seed Data ---\n${JSON.stringify(seedData, null, 2)}` : '';
-  const basePrompt = `${predictionQuery}\n${seedContext}${memoryCtx}`;
+  const basePrompt = `${predictionQuery}\n${seedContext}${memoryCtx}${ragCtx}`;
 
   let allThematicResults = [];
   let allDistrictResults = [];
@@ -255,7 +257,8 @@ async function runDistrictSimulation(simulationId, district, predictionQuery) {
   status.totalAgents = thematicAgents.length + 1 + 1; // thematic + district + moderator
 
   const memoryCtx = getMemoryContext();
-  const basePrompt = `${predictionQuery}\n${memoryCtx}`;
+  const ragCtx = await ragRetrieve(`${district.name} ${district.nameCn} property real estate`);
+  const basePrompt = `${predictionQuery}\n${memoryCtx}${ragCtx}`;
 
   // Phase 1: Thematic agents — run sequentially to avoid proxy rate limits
   status.currentRound = 1;
@@ -429,7 +432,8 @@ async function runEstateSimulation(simulationId, estate, district, predictionQue
   status.totalAgents = thematicAgents.length + 1;
 
   const memoryCtx = getMemoryContext();
-  const basePrompt = `${predictionQuery}\n${memoryCtx}`;
+  const ragCtx = await ragRetrieve(`${estate.name} Hong Kong property estate`);
+  const basePrompt = `${predictionQuery}\n${memoryCtx}${ragCtx}`;
 
   // Phase 1: Run 3 key thematic agents sequentially
   status.currentRound = 1;

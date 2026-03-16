@@ -30,7 +30,8 @@
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
     "openai": "^4.77.0",
-    "uuid": "^11.0.5"
+    "uuid": "^11.0.5",
+    "vectra": "^0.12.3"
   },
   "devDependencies": {
     "concurrently": "^9.1.2"

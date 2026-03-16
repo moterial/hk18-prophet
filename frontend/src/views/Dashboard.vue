@@ -651,14 +651,15 @@ async function onEstateSelect(estate) {
     if (existingTask.status === 'completed' && existingTask.report) {
       estateReport.value = existingTask.report;
       estateLoading.value = false;
+      estateSimulationId.value = existingTask.simulationId;
       showEstateModal.value = true;
       return;
     }
-    // Still running — open modal in loading state and resume tracking
+    // Still running — open modal in loading state; bgPoll already updates estateProgress
     estateSimulationId.value = existingTask.simulationId;
+    estateProgress.value = { agentsCompleted: 0, totalAgents: 4, currentPhase: existingTask.phase || 'Analyzing...' };
     estateLoading.value = true;
     showEstateModal.value = true;
-    trackEstateFromBg(existingTask);
     return;
   }
 
@@ -703,21 +704,7 @@ async function onEstateSelect(estate) {
   }
 }
 
-function trackEstateFromBg(task) {
-  // Sync bg task progress to the modal's progress display
-  const syncInterval = setInterval(() => {
-    estateProgress.value = { agentsCompleted: 0, totalAgents: 4, currentPhase: task.phase };
-    if (task.status === 'completed') {
-      clearInterval(syncInterval);
-      estateReport.value = task.report;
-      estateLoading.value = false;
-    } else if (task.status === 'failed') {
-      clearInterval(syncInterval);
-      estateLoading.value = false;
-    }
-  }, 500);
-}
-
+// startBgEstatePoll is the single source of truth for progress + completion
 function startBgEstatePoll(task) {
   if (bgPollIntervals[task.id]) clearInterval(bgPollIntervals[task.id]);
   bgPollIntervals[task.id] = setInterval(async () => {
@@ -770,19 +757,18 @@ function startBgEstatePoll(task) {
 }
 
 function openBgEstateReport(task) {
+  selectedEstate.value = task.estate;
+  estateSimulationId.value = task.simulationId;
   if (task.status === 'completed' && task.report) {
-    selectedEstate.value = task.estate;
     estateReport.value = task.report;
+    estateProgress.value = null;
     estateLoading.value = false;
-    estateSimulationId.value = task.simulationId;
     showEstateModal.value = true;
   } else if (task.status === 'running') {
-    selectedEstate.value = task.estate;
-    estateSimulationId.value = task.simulationId;
-    estateLoading.value = true;
     estateReport.value = null;
+    estateProgress.value = { agentsCompleted: 0, totalAgents: 4, currentPhase: task.phase || 'Analyzing...' };
+    estateLoading.value = true;
     showEstateModal.value = true;
-    trackEstateFromBg(task);
   }
 }
 

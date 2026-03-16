@@ -89,6 +89,7 @@ The frontend is an **interactive SVG map of Hong Kong's 18 districts**. Click an
 - **🤖 Multi-Agent Debate** — 8 specialized agents debate and synthesize predictions
 - **🏘️ Estate-Level Detail** — Predictions for 5+ major 屋苑 per district
 - **📰 News-Driven** — Cites real news events and policy changes with sources
+- **📦 RAG (Retrieval-Augmented Generation)** — Automatically scrapes live news, indexes them in a vector store, and injects relevant articles into agent prompts for grounded, evidence-based analysis
 - **🇭🇰 繁體中文報告** — All analysis output in Traditional Chinese, prices in HKD
 - **🔌 LLM Agnostic** — Works with any OpenAI SDK-compatible API (xAI Grok, OpenAI, Gemini, Groq, Ollama, etc.)
 
@@ -358,7 +359,76 @@ Search estate → Two paths:
 
 ---
 
-## 🛣️ Roadmap
+## � RAG — Retrieval-Augmented Generation
+
+HK18 Prophet uses **RAG (Retrieval-Augmented Generation)** to ground AI predictions in real, recent news rather than relying solely on the LLM's stale training data.
+
+### What is RAG?
+
+Without RAG, the AI agents generate predictions entirely from memory (their training data), which can be months out of date. They may **hallucinate** fake news headlines or cite events that never happened.
+
+With RAG, before each analysis the system **retrieves real news articles** from a local index and **injects them into the prompt**. The AI still does the reasoning, but now it has fresh evidence to work with.
+
+```
+Without RAG:                          With RAG:
+
+Question → AI → Answer               Question
+           ↑                               │
+     (old memory only,                     ▼
+      may hallucinate)              📂 Search vector store
+                                     for relevant articles
+                                           │
+                                           ▼
+                                   Question + Real News → AI → Answer
+                                                          ↑
+                                                    (grounded in
+                                                     real evidence)
+```
+
+### How it works in this project
+
+**Step 1: Collect** — Every 30 minutes, the server scrapes free news sources:
+- RTHK (Hong Kong public broadcaster)
+- news.gov.hk (HK Government News)
+- NewsAPI (if API key configured)
+
+**Step 2: Index** — Each article is converted to a numerical vector and stored in a local vector database (`data/rag-index/` via [vectra](https://github.com/Stevenic/vectra)). No external database needed — everything is JSON files on disk.
+
+**Step 3: Retrieve** — When an analysis starts (district or estate), the system:
+1. Takes the query (e.g. `"嘉湖山莊 Hong Kong property estate"`)
+2. Converts it to a vector
+3. Finds the 5 most similar articles in the index
+4. Formats them as context:
+   ```
+   --- Retrieved News Context (RAG) ---
+   - [RTHK] NT housing demand rises after policy changes (2026-03-15)
+   - [news.gov.hk] Government approves Yuen Long development (2026-03-14)
+   ```
+
+**Step 4: Inject** — The retrieved context is appended to every agent's prompt, so all 4 agents (Economic, Transaction, Infrastructure, Estate Analyst) reason with real news.
+
+### RAG vs GraphRAG
+
+This project uses **plain RAG** (vector similarity search over a flat article index), not **GraphRAG**.
+
+| | Plain RAG (what we use) | GraphRAG |
+|---|---|---|
+| **Storage** | Flat list of articles in a vector store | Knowledge graph with entities & relationships |
+| **Search** | Find articles with similar words/meaning | Walk graph edges to discover indirect connections |
+| **Example** | Query "嘉湖山莊" → finds articles mentioning "嘉湖山莊" | Query "嘉湖山莊" → walks: 嘉湖山莊 → Yuen Long → Northern Metropolis → GBA Policy → Capital Flows |
+| **Indirect links?** | ❌ Only finds directly relevant articles | ✅ Discovers connections across multiple hops |
+| **Multi-level summaries?** | ❌ No | ✅ Global → community → local summaries |
+| **Infrastructure** | Just a JSON folder on disk | Needs graph DB (Neo4j) + entity extraction pipeline |
+| **Cost** | Low (no extra LLM calls for indexing) | High (many LLM calls to extract entities & build graph) |
+
+We chose plain RAG because it provides the core benefit (real news grounding) with minimal infrastructure. A future upgrade to GraphRAG would enable the system to discover indirect relationships like "a stamp duty policy affects 嘉湖山莊 through its impact on Yuen Long transaction volumes" — even if no article mentions both topics together.
+
+### API
+
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `GET` | `/api/rag/stats` | Returns `{ indexed: N }` — number of articles in the vector store |
+
 
 - [x] Multi-agent simulation engine
 - [x] 9 specialized agent types (6 thematic + district + district moderator + full moderator)
@@ -375,7 +445,11 @@ Search estate → Two paths:
 - [x] District picker for custom searches (user selects district for higher accuracy)
 - [x] Hybrid search: autocomplete from 180 known estates + free-text for anything else
 - [x] News/policy citations with sources
+- [x] RAG: vector store news retrieval injected into all agent prompts
+- [x] Auto-refreshing news scraper (RTHK, news.gov.hk, NewsAPI)
+- [x] Background estate analysis with floating progress indicator & toast notifications
 - [x] LLM provider agnostic (xAI Grok, OpenAI, Gemini, Groq, Ollama)
+- [ ] Upgrade to GraphRAG (knowledge graph with entity extraction & relationship traversal)
 - [ ] Live data scraping (Land Registry, RVD, Centaline)
 - [ ] Historical accuracy tracking
 - [ ] PDF report export

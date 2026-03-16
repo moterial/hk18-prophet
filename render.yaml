@@ -3,7 +3,7 @@ services:
     name: hk18-prophet
     runtime: node
     plan: free
-    buildCommand: npm install && cd frontend && npm install && npm run build
+    buildCommand: npm install && cd frontend && npm install --include=dev && npm run build
     startCommand: node backend/server.js
     envVars:
       - key: NODE_ENV

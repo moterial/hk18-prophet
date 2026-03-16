@@ -9,7 +9,7 @@
     "backend": "node --watch backend/server.js",
     "frontend": "cd frontend && npm run dev",
     "setup": "npm install && cd frontend && npm install",
-    "build": "cd frontend && npm install && npm run build",
+    "build": "cd frontend && npm install --include=dev && npm run build",
     "start": "node backend/server.js",
     "test": "node --test backend/**/*.test.js"
   },

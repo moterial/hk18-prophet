@@ -53,11 +53,38 @@ body {
   font-size: 1.5rem;
   font-weight: 700;
   color: #f0f6fc;
+  white-space: nowrap;
 }
 
 .subtitle {
   font-size: 0.9rem;
   color: #8b949e;
+  white-space: nowrap;
+}
+
+@media (max-width: 700px) {
+  .app-header {
+    height: 48px;
+    padding: 6px 12px;
+  }
+  .header-content h1 {
+    font-size: 1.1rem;
+  }
+  .subtitle {
+    font-size: 0.7rem;
+  }
+  .header-content {
+    gap: 8px;
+  }
+}
+
+@media (max-width: 380px) {
+  .header-content h1 {
+    font-size: 1rem;
+  }
+  .subtitle {
+    display: none;
+  }
 }
 
 main {

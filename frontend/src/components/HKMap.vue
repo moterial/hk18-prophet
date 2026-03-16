@@ -218,7 +218,7 @@
       </g>
 
       <!-- Tooltip -->
-      <foreignObject v-if="hover" :x="tooltipX" :y="tooltipY" width="200" height="80" class="tooltip-fo">
+      <foreignObject v-if="hover" :x="tooltipPos.x" :y="tooltipPos.y" width="200" height="80" class="tooltip-fo" style="pointer-events: none; overflow: visible;">
         <div class="map-tooltip">
           <strong>{{ getDistrict(hover)?.nameCn }} {{ getDistrict(hover)?.name }}</strong>
           <div class="tooltip-detail">{{ getDistrict(hover)?.character }}</div>
@@ -248,8 +248,21 @@ defineEmits(['select']);
 
 const hover = ref(null);
 
-const tooltipX = computed(() => 350);
-const tooltipY = computed(() => 10);
+// Approximate center points for each district (for tooltip positioning)
+const districtCenters = {
+  IS: { x: 45, y: 280 }, TM: { x: 110, y: 145 }, YL: { x: 190, y: 95 },
+  NO: { x: 330, y: 55 }, TP: { x: 390, y: 130 }, ST: { x: 320, y: 170 },
+  SK: { x: 475, y: 220 }, TW: { x: 205, y: 170 }, KI: { x: 182, y: 250 },
+  SSP: { x: 240, y: 265 }, KC: { x: 310, y: 250 }, WTS: { x: 358, y: 235 },
+  KT: { x: 400, y: 255 }, YTM: { x: 262, y: 325 },
+  CW: { x: 255, y: 390 }, WC: { x: 328, y: 390 }, EA: { x: 425, y: 390 },
+  SO: { x: 335, y: 455 },
+};
+
+const tooltipPos = computed(() => {
+  const center = districtCenters[hover.value] || { x: 350, y: 10 };
+  return { x: center.x, y: center.y };
+});
 
 function getDistrict(code) {
   return props.districts.find(d => d.code === code);
@@ -405,5 +418,23 @@ function sublabelClass(code) {
   font-size: 11px;
   margin-top: 2px;
   font-weight: 600;
+}
+
+/* Mobile: make the map fill better and tooltip readable */
+@media (max-width: 700px) {
+  .hk-map-wrapper {
+    padding: 0;
+  }
+  .hk-map {
+    width: 100%;
+    height: 100%;
+  }
+  .map-tooltip {
+    font-size: 10px;
+    padding: 6px 8px;
+  }
+  .map-tooltip strong {
+    font-size: 11px;
+  }
 }
 </style>

@@ -1,6 +1,7 @@
 // backend/agents/base-agent.js — Base class for all agents
 import OpenAI from 'openai';
 import { config } from '../config.js';
+import { acquireLLMSlot, releaseLLMSlot } from '../simulation/engine.js';
 
 function sleep(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
@@ -93,7 +94,13 @@ export class BaseAgent {
         if (!isReasoning) {
           params.temperature = this.temperature;
         }
-        const response = await this.client.chat.completions.create(params, { signal: controller.signal });
+        await acquireLLMSlot();
+        let response;
+        try {
+          response = await this.client.chat.completions.create(params, { signal: controller.signal });
+        } finally {
+          releaseLLMSlot();
+        }
         clearTimeout(timer);
         return response;
       } catch (error) {

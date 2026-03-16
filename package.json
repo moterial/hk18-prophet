@@ -9,6 +9,7 @@
     "backend": "node --watch backend/server.js",
     "frontend": "cd frontend && npm run dev",
     "setup": "npm install && cd frontend && npm install",
+    "build": "cd frontend && npm install && npm run build",
     "start": "node backend/server.js",
     "test": "node --test backend/**/*.test.js"
   },
@@ -25,6 +26,9 @@
   ],
   "author": "",
   "license": "SEE LICENSE IN LICENSE",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "dependencies": {
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",

@@ -1,0 +1,18 @@
+services:
+  - type: web
+    name: hk18-prophet
+    runtime: node
+    plan: free
+    buildCommand: npm install && cd frontend && npm install && npm run build
+    startCommand: node backend/server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: CACHE_TTL_HOURS
+        value: "24"
+      - key: LLM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_MODEL_NAME
+        sync: false

@@ -2,7 +2,7 @@
 import { Router } from 'express';
 import rateLimit from 'express-rate-limit';
 import { config } from '../config.js';
-import { startSimulation, startDistrictSimulation, startEstateSimulation, getSimulationStatus, getCachedDistrictResult, getCachedEstateResult, getRunningDistricts } from '../simulation/engine.js';
+import { startSimulation, startDistrictSimulation, startEstateSimulation, getSimulationStatus, getCachedDistrictResult, getCachedEstateResult, getRunningDistricts, getRunningEstates } from '../simulation/engine.js';
 import { getAgentManifest } from '../agents/index.js';
 import { NewsFetcher } from '../data-sources/news-fetcher.js';
 import { ragStats } from '../data-sources/rag-store.js';
@@ -32,6 +32,17 @@ const districtLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: `Rate limit exceeded. Max ${config.rateLimit.districtPerHour} district analyses per hour.` },
+  validate: { trustProxy: false },
+});
+
+// Global rate limiter — across ALL IPs, protects LLM proxy from total overload
+const globalAnalysisLimiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute window
+  max: config.rateLimit.globalPerMinute,
+  standardHeaders: true,
+  legacyHeaders: false,
+  keyGenerator: () => 'global', // single bucket for all users
+  message: { error: `Server busy. Too many analyses running globally. Please try again in a minute.` },
   validate: { trustProxy: false },
 });
 
@@ -217,7 +228,7 @@ apiRouter.get('/estates/search', (req, res) => {
 });
 
 // POST /api/estate/analyze — Start single-estate analysis (known or free-text)
-apiRouter.post('/estate/analyze', estateLimiter, async (req, res) => {
+apiRouter.post('/estate/analyze', globalAnalysisLimiter, estateLimiter, async (req, res) => {
   try {
     const { estateName, districtCode, query } = req.body;
     const force = req.query.force === 'true' && config.server.nodeEnv !== 'production';
@@ -235,6 +246,11 @@ apiRouter.post('/estate/analyze', estateLimiter, async (req, res) => {
         const cached = getCachedEstateResult(estateKey);
         if (cached) {
           return res.json({ cached: true, report: cached.report, simulationId: cached.simulationId });
+        }
+        // In-flight dedup: return existing simulation if already running
+        const running = getRunningEstates();
+        if (running[estateKey]) {
+          return res.json({ status: 'running', simulationId: running[estateKey].simulationId, estateKey });
         }
       }
       const result = await startEstateSimulation({
@@ -268,6 +284,11 @@ apiRouter.post('/estate/analyze', estateLimiter, async (req, res) => {
       if (cached) {
         return res.json({ cached: true, report: cached.report, simulationId: cached.simulationId });
       }
+      // In-flight dedup: return existing simulation if already running
+      const running = getRunningEstates();
+      if (running[estateKey]) {
+        return res.json({ status: 'running', simulationId: running[estateKey].simulationId, estateKey });
+      }
     }
 
     const result = await startEstateSimulation({ estateName: estate.name, districtCode: code });
@@ -279,7 +300,7 @@ apiRouter.post('/estate/analyze', estateLimiter, async (req, res) => {
 });
 
 // POST /api/district/:code/analyze — Start single-district analysis
-apiRouter.post('/district/:code/analyze', districtLimiter, async (req, res) => {
+apiRouter.post('/district/:code/analyze', globalAnalysisLimiter, districtLimiter, async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
     const district = config.districts.find(d => d.code === code);

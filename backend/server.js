@@ -64,7 +64,8 @@ const server = app.listen(config.server.port, () => {
   console.log(`\n🏠 HK18 Prophet API running on http://localhost:${config.server.port}`);
   console.log(`🤖 LLM: ${config.llm.baseUrl} / ${config.llm.modelName}`);
   console.log(`⏱️ Cache TTL: ${config.cache.ttlHours}h`);
-  console.log(`🛡️ Rate limit: ${config.rateLimit.customEstatePerHour} custom/h, ${config.rateLimit.districtPerHour} district/h`);
+  console.log(`🛡️ Rate limit: ${config.rateLimit.customEstatePerHour} custom/h, ${config.rateLimit.districtPerHour} district/h, ${config.rateLimit.globalPerMinute} global/min`);
+  console.log(`🔗 LLM concurrency: max ${config.llmConcurrency} simultaneous calls`);
   console.log(`🌍 Mode: ${config.server.nodeEnv}`);
   console.log(`📊 Districts: ${config.districts.length}`);
 

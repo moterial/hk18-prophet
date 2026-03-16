@@ -1192,8 +1192,174 @@ onUnmounted(() => {
 .btn-reanalyze:hover, .btn-retry:hover { border-color: #58a6ff; background: #1c2333; }
 
 @media (max-width: 700px) {
-  .modal-container { width: 95vw; padding: 16px; }
-  .predictions-row { grid-template-columns: 1fr; }
-  .ro-row { grid-template-columns: 1fr; }
+  .fullpage-map {
+    height: calc(100vh - 48px);
+    height: calc(100dvh - 48px);
+  }
+
+  /* Search bar — full width, smaller padding */
+  .search-bar {
+    width: calc(100vw - 24px);
+    top: 10px;
+  }
+  .search-input {
+    font-size: 0.8rem;
+    padding: 8px 32px 8px 32px;
+  }
+  .search-dropdown {
+    max-height: 260px;
+  }
+
+  /* Legend — horizontal scroll, smaller */
+  .map-legend {
+    bottom: 8px;
+    left: 8px;
+    right: 8px;
+    gap: 8px;
+    font-size: 0.65rem;
+    padding: 6px 10px;
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+
+  /* Background tasks panel — full width bottom strip on mobile */
+  .bg-tasks-panel {
+    top: auto;
+    bottom: 52px;
+    right: 8px;
+    left: 8px;
+    min-width: unset;
+  }
+  .bg-tasks-list {
+    max-height: 160px;
+  }
+
+  /* Toast — full width at bottom */
+  .toast-notification {
+    bottom: 12px;
+    right: 12px;
+    left: 12px;
+    max-width: unset;
+  }
+
+  /* Modal */
+  .modal-container {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 100vh;
+    max-height: 100dvh;
+    border-radius: 12px 12px 0 0;
+    padding: 16px;
+    margin-top: auto;
+  }
+  .modal-overlay {
+    align-items: flex-end;
+  }
+  .modal-header {
+    flex-direction: column;
+    gap: 8px;
+  }
+  .modal-header h2 {
+    font-size: 1.1rem;
+  }
+  .header-badges {
+    flex-wrap: wrap;
+  }
+
+  /* Predictions */
+  .predictions-row {
+    grid-template-columns: 1fr;
+  }
+  .pred-change {
+    font-size: 1.2rem;
+  }
+
+  /* Estates grid */
+  .estates-grid {
+    grid-template-columns: 1fr;
+  }
+
+  /* Risks/opportunities */
+  .ro-row {
+    grid-template-columns: 1fr;
+  }
+
+  /* District picker */
+  .district-picker-container {
+    width: 100vw;
+    max-width: 100vw;
+    max-height: 90vh;
+    max-height: 90dvh;
+    border-radius: 12px 12px 0 0;
+    padding: 20px 16px;
+  }
+  .district-grid {
+    grid-template-columns: repeat(3, 1fr);
+    gap: 6px;
+  }
+  .district-pick-card {
+    padding: 10px 6px;
+  }
+  .pick-name {
+    font-size: 0.85rem;
+  }
+  .pick-en {
+    font-size: 0.65rem;
+  }
+  .picker-title {
+    font-size: 1rem;
+  }
+
+  /* Summary text */
+  .summary-box {
+    font-size: 0.82rem;
+    padding: 10px;
+  }
+
+  /* Loading detail */
+  .loading-detail {
+    width: 100%;
+    max-width: 280px;
+  }
+
+  /* News cards */
+  .news-meta {
+    flex-direction: column;
+    gap: 2px;
+  }
+}
+
+/* Small phones */
+@media (max-width: 380px) {
+  .search-bar {
+    width: calc(100vw - 16px);
+    top: 6px;
+  }
+  .district-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+  .modal-container {
+    padding: 12px;
+  }
+  .map-legend {
+    font-size: 0.6rem;
+    gap: 6px;
+    padding: 4px 8px;
+  }
+}
+
+/* Tablet landscape */
+@media (min-width: 701px) and (max-width: 1024px) {
+  .search-bar {
+    width: 480px;
+  }
+  .modal-container {
+    width: 92vw;
+    max-width: 800px;
+  }
+  .district-picker-container {
+    width: 85vw;
+    max-width: 580px;
+  }
 }
 </style>

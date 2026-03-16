@@ -9,11 +9,40 @@ import { ragRetrieve } from '../data-sources/rag-store.js';
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
 const DELAY_BETWEEN_AGENTS = parseInt(process.env.DELAY_BETWEEN_AGENTS || '1000', 10); // 1s default (Grok/OpenAI have generous limits)
 
+// ── Global LLM concurrency semaphore ──
+// Limits total simultaneous LLM calls across ALL users/analyses to prevent proxy overload
+const LLM_MAX_CONCURRENT = config.llmConcurrency || 3;
+let llmRunning = 0;
+const llmQueue = [];
+
+export function acquireLLMSlot() {
+  return new Promise(resolve => {
+    if (llmRunning < LLM_MAX_CONCURRENT) {
+      llmRunning++;
+      resolve();
+    } else {
+      llmQueue.push(resolve);
+    }
+  });
+}
+
+export function releaseLLMSlot() {
+  if (llmQueue.length > 0) {
+    const next = llmQueue.shift();
+    next();
+  } else {
+    llmRunning--;
+  }
+}
+
 // In-memory tracking of running simulations
 const activeSimulations = new Map();
 
 // Track which districts currently have a running simulation
 const runningDistricts = new Map(); // districtCode -> simulationId
+
+// Track which estates currently have a running simulation (in-flight dedup)
+const runningEstates = new Map(); // estateKey -> simulationId
 
 // District result cache: { report, timestamp }
 const districtCache = new Map();
@@ -57,6 +86,19 @@ export function getRunningDistricts() {
       running[code] = { simulationId: simId, agentsCompleted: status.agentsCompleted, totalAgents: status.totalAgents, currentPhase: status.currentPhase };
     } else {
       runningDistricts.delete(code);
+    }
+  }
+  return running;
+}
+
+export function getRunningEstates() {
+  const running = {};
+  for (const [key, simId] of runningEstates.entries()) {
+    const status = activeSimulations.get(simId);
+    if (status && status.status === 'running') {
+      running[key] = { simulationId: simId, agentsCompleted: status.agentsCompleted, totalAgents: status.totalAgents, currentPhase: status.currentPhase };
+    } else {
+      runningEstates.delete(key);
     }
   }
   return running;
@@ -445,8 +487,12 @@ export async function startEstateSimulation({ estateName, districtCode, query })
     console.error(`❌ Estate simulation ${simulationId} failed:`, err);
     status.status = 'failed';
     status.error = err.message;
+    runningEstates.delete(status.estateKey);
     updateSimulationStatus(simulationId, 'failed');
   });
+
+  // Track this estate as running (in-flight dedup)
+  runningEstates.set(estateKey, simulationId);
 
   return { simulationId, status: 'started', estateKey };
 }
@@ -501,6 +547,7 @@ async function runEstateSimulation(simulationId, estate, district, predictionQue
   const estateKey = district ? `${district.code}:${estate.name}` : `custom:${estate.name}`;
   estateCache.set(estateKey, { report: estateResult.result, timestamp: Date.now(), simulationId });
   try { saveReport(`estate:${estateKey}`, 'estate', estateResult.result, simulationId); } catch {}
+  runningEstates.delete(status.estateKey);
 
   try {
     updateSimulationStatus(simulationId, 'completed');
@@ -512,4 +559,4 @@ async function runEstateSimulation(simulationId, estate, district, predictionQue
   return estateResult.result;
 }
 
-export default { startSimulation, startDistrictSimulation, startEstateSimulation, getSimulationStatus, getRunningDistricts };
+export default { startSimulation, startDistrictSimulation, startEstateSimulation, getSimulationStatus, getRunningDistricts, getRunningEstates };

@@ -35,7 +35,11 @@ export const config = {
   rateLimit: {
     customEstatePerHour: parseInt(process.env.RATE_LIMIT_CUSTOM_PER_HOUR || '10', 10),
     districtPerHour: parseInt(process.env.RATE_LIMIT_DISTRICT_PER_HOUR || '30', 10),
+    globalPerMinute: parseInt(process.env.RATE_LIMIT_GLOBAL_PER_MINUTE || '30', 10),
   },
+
+  // Global LLM concurrency — max simultaneous LLM calls across all users
+  llmConcurrency: parseInt(process.env.LLM_MAX_CONCURRENT || '3', 10),
 
   // Database
   db: {

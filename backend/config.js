@@ -26,6 +26,17 @@ export const config = {
     districtBatchSize: 6,
   },
 
+  // Cache
+  cache: {
+    ttlHours: parseFloat(process.env.CACHE_TTL_HOURS || '1'), // 1h dev, 24h for prod
+  },
+
+  // Rate limiting
+  rateLimit: {
+    customEstatePerHour: parseInt(process.env.RATE_LIMIT_CUSTOM_PER_HOUR || '10', 10),
+    districtPerHour: parseInt(process.env.RATE_LIMIT_DISTRICT_PER_HOUR || '30', 10),
+  },
+
   // Database
   db: {
     path: process.env.DB_PATH || './data/hk18prophet.db',

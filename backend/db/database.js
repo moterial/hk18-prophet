@@ -11,6 +11,7 @@ let data = {
   district_predictions: [],
   actual_outcomes: [],
   seed_data: [],
+  reports: [],  // { key, type, report, simulationId, created_at }
 };
 
 function load() {
@@ -109,4 +110,39 @@ export function getSimulationPredictions(simulationId) {
   return data.district_predictions
     .filter(p => p.simulation_id === simulationId)
     .sort((a, b) => (a.district_code || '').localeCompare(b.district_code || ''));
+}
+
+// ── Persistent report storage ──
+
+export function saveReport(key, type, report, simulationId) {
+  load();
+  // Ensure reports array exists (migration from older DB files)
+  if (!data.reports) data.reports = [];
+  // Remove old report for this key
+  data.reports = data.reports.filter(r => r.key !== key);
+  data.reports.push({
+    key,
+    type, // 'district' | 'estate'
+    report,
+    simulationId,
+    created_at: new Date().toISOString(),
+  });
+  // Keep max 500 reports to prevent unbounded growth
+  if (data.reports.length > 500) {
+    data.reports = data.reports
+      .sort((a, b) => b.created_at.localeCompare(a.created_at))
+      .slice(0, 500);
+  }
+  save();
+}
+
+export function getLatestReport(key, maxAgeMs) {
+  load();
+  if (!data.reports) return null;
+  const report = data.reports.find(r => r.key === key);
+  if (!report) return null;
+  if (maxAgeMs && Date.now() - new Date(report.created_at).getTime() > maxAgeMs) {
+    return null; // expired
+  }
+  return report;
 }

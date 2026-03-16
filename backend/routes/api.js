@@ -1,5 +1,6 @@
 // backend/routes/api.js — REST API routes
 import { Router } from 'express';
+import rateLimit from 'express-rate-limit';
 import { config } from '../config.js';
 import { startSimulation, startDistrictSimulation, startEstateSimulation, getSimulationStatus, getCachedDistrictResult, getCachedEstateResult, getRunningDistricts } from '../simulation/engine.js';
 import { getAgentManifest } from '../agents/index.js';
@@ -14,6 +15,25 @@ import {
 
 export const apiRouter = Router();
 const newsFetcher = new NewsFetcher();
+
+// Rate limiters — protect LLM-consuming endpoints
+const estateLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000, // 1 hour
+  max: config.rateLimit.customEstatePerHour,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: `Rate limit exceeded. Max ${config.rateLimit.customEstatePerHour} estate analyses per hour.` },
+  validate: { trustProxy: false },
+});
+
+const districtLimiter = rateLimit({
+  windowMs: 60 * 60 * 1000,
+  max: config.rateLimit.districtPerHour,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: `Rate limit exceeded. Max ${config.rateLimit.districtPerHour} district analyses per hour.` },
+  validate: { trustProxy: false },
+});
 
 // RAG stats
 apiRouter.get('/rag/stats', async (req, res) => {
@@ -197,10 +217,10 @@ apiRouter.get('/estates/search', (req, res) => {
 });
 
 // POST /api/estate/analyze — Start single-estate analysis (known or free-text)
-apiRouter.post('/estate/analyze', async (req, res) => {
+apiRouter.post('/estate/analyze', estateLimiter, async (req, res) => {
   try {
     const { estateName, districtCode, query } = req.body;
-    const force = req.query.force === 'true';
+    const force = req.query.force === 'true' && config.server.nodeEnv !== 'production';
 
     // Free-text mode: user typed any building name
     if (query) {
@@ -259,7 +279,7 @@ apiRouter.post('/estate/analyze', async (req, res) => {
 });
 
 // POST /api/district/:code/analyze — Start single-district analysis
-apiRouter.post('/district/:code/analyze', async (req, res) => {
+apiRouter.post('/district/:code/analyze', districtLimiter, async (req, res) => {
   try {
     const code = req.params.code.toUpperCase();
     const district = config.districts.find(d => d.code === code);
@@ -267,8 +287,8 @@ apiRouter.post('/district/:code/analyze', async (req, res) => {
       return res.status(404).json({ error: 'District not found' });
     }
 
-    // Check cache first — return cached result if < 1 hour old (unless force=true)
-    const force = req.query.force === 'true';
+    // Check cache first — return cached result if within TTL (unless force=true in dev)
+    const force = req.query.force === 'true' && config.server.nodeEnv !== 'production';
     if (!force) {
       const cached = getCachedDistrictResult(code);
       if (cached) {

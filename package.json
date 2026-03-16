@@ -29,6 +29,8 @@
     "cors": "^2.8.5",
     "dotenv": "^16.4.7",
     "express": "^4.21.2",
+    "express-rate-limit": "^8.3.1",
+    "helmet": "^8.1.0",
     "openai": "^4.77.0",
     "uuid": "^11.0.5",
     "vectra": "^0.12.3"

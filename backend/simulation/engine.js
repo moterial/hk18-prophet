@@ -3,7 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { createAgentTeam, createSingleDistrictTeam, createEstateTeam } from '../agents/index.js';
 import { config } from '../config.js';
 import { saveSimulationMemory, savePredictionMemory, getMemoryContext } from './memory-store.js';
-import { saveSimulation, updateSimulationStatus, saveDistrictPredictions } from '../db/database.js';
+import { saveSimulation, updateSimulationStatus, saveDistrictPredictions, saveReport, getLatestReport } from '../db/database.js';
 import { ragRetrieve } from '../data-sources/rag-store.js';
 
 const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -17,16 +17,36 @@ const runningDistricts = new Map(); // districtCode -> simulationId
 
 // District result cache: { report, timestamp }
 const districtCache = new Map();
-const CACHE_TTL = 60 * 60 * 1000; // 1 hour
+const CACHE_TTL = (config.cache?.ttlHours || 1) * 60 * 60 * 1000;
+
+// Cleanup completed simulations from memory after 2 hours to prevent leaks
+const SIM_CLEANUP_AGE = 2 * 60 * 60 * 1000;
+setInterval(() => {
+  const now = Date.now();
+  for (const [id, sim] of activeSimulations.entries()) {
+    if ((sim.status === 'completed' || sim.status === 'failed') && sim.completedAt) {
+      const age = now - new Date(sim.completedAt).getTime();
+      if (age > SIM_CLEANUP_AGE) activeSimulations.delete(id);
+    }
+  }
+}, 10 * 60 * 1000); // check every 10 min
 
 export function getCachedDistrictResult(districtCode) {
-  const cached = districtCache.get(districtCode.toUpperCase());
-  if (!cached) return null;
-  if (Date.now() - cached.timestamp > CACHE_TTL) {
-    districtCache.delete(districtCode.toUpperCase());
-    return null;
+  const code = districtCode.toUpperCase();
+  // Check in-memory cache first
+  const cached = districtCache.get(code);
+  if (cached && Date.now() - cached.timestamp <= CACHE_TTL) return cached;
+  if (cached) districtCache.delete(code);
+
+  // Check persistent DB
+  const dbReport = getLatestReport(`district:${code}`, CACHE_TTL);
+  if (dbReport) {
+    // Re-hydrate memory cache
+    const entry = { report: dbReport.report, timestamp: new Date(dbReport.created_at).getTime(), simulationId: dbReport.simulationId };
+    districtCache.set(code, entry);
+    return entry;
   }
-  return cached;
+  return null;
 }
 
 export function getRunningDistricts() {
@@ -327,8 +347,9 @@ async function runDistrictSimulation(simulationId, district, predictionQuery) {
     console.error('⚠️ DB save error:', err.message);
   }
 
-  // Cache the result
+  // Cache the result (memory + DB)
   districtCache.set(district.code, { report: moderatorResult.result, timestamp: Date.now(), simulationId });
+  try { saveReport(`district:${district.code}`, 'district', moderatorResult.result, simulationId); } catch {}
   runningDistricts.delete(district.code);
 
   console.log(`\n✅ District simulation for ${district.name} completed!`);
@@ -340,13 +361,19 @@ async function runDistrictSimulation(simulationId, district, predictionQuery) {
 const estateCache = new Map();
 
 export function getCachedEstateResult(estateKey) {
+  // Check in-memory cache first
   const cached = estateCache.get(estateKey);
-  if (!cached) return null;
-  if (Date.now() - cached.timestamp > CACHE_TTL) {
-    estateCache.delete(estateKey);
-    return null;
+  if (cached && Date.now() - cached.timestamp <= CACHE_TTL) return cached;
+  if (cached) estateCache.delete(estateKey);
+
+  // Check persistent DB
+  const dbReport = getLatestReport(`estate:${estateKey}`, CACHE_TTL);
+  if (dbReport) {
+    const entry = { report: dbReport.report, timestamp: new Date(dbReport.created_at).getTime(), simulationId: dbReport.simulationId };
+    estateCache.set(estateKey, entry);
+    return entry;
   }
-  return cached;
+  return null;
 }
 
 export async function startEstateSimulation({ estateName, districtCode, query }) {
@@ -470,9 +497,10 @@ async function runEstateSimulation(simulationId, estate, district, predictionQue
   status.completedAt = new Date().toISOString();
   status.currentPhase = 'Complete';
 
-  // Cache the result
+  // Cache the result (memory + DB)
   const estateKey = district ? `${district.code}:${estate.name}` : `custom:${estate.name}`;
   estateCache.set(estateKey, { report: estateResult.result, timestamp: Date.now(), simulationId });
+  try { saveReport(`estate:${estateKey}`, 'estate', estateResult.result, simulationId); } catch {}
 
   try {
     updateSimulationStatus(simulationId, 'completed');

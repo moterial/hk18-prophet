@@ -79,11 +79,11 @@ export class BaseAgent {
 
   async callLLM(messages, retries = 2) {
     const isReasoning = /reasoner|r1/i.test(config.llm.modelName);
-    const perCallTimeout = isReasoning ? 180000 : 90000; // 180s for reasoning, 90s for normal
+    // Scale timeout with maxTokens: moderators (8000 tokens) get ~180s, regular agents (2000) get ~120s
+    const baseTimeout = isReasoning ? 180000 : 120000;
+    const perCallTimeout = Math.max(baseTimeout, this.maxTokens * 22); // ~22ms per token budget
 
     for (let attempt = 0; attempt <= retries; attempt++) {
-      const controller = new AbortController();
-      const timer = setTimeout(() => controller.abort(), perCallTimeout);
       try {
         const params = {
           model: config.llm.modelName,
@@ -95,16 +95,18 @@ export class BaseAgent {
           params.temperature = this.temperature;
         }
         await acquireLLMSlot();
+        // AbortController starts AFTER acquiring slot — queue wait doesn't eat into timeout
+        const controller = new AbortController();
+        const timer = setTimeout(() => controller.abort(), perCallTimeout);
         let response;
         try {
           response = await this.client.chat.completions.create(params, { signal: controller.signal });
         } finally {
+          clearTimeout(timer);
           releaseLLMSlot();
         }
-        clearTimeout(timer);
         return response;
       } catch (error) {
-        clearTimeout(timer);
         const isRateLimit = error.status === 429 || error.message?.includes('429');
         const isTimeout = error.name === 'AbortError' || error.code === 'ETIMEDOUT' || error.message?.includes('timeout');
         if ((isRateLimit || isTimeout) && attempt < retries) {

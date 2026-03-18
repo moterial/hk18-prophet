@@ -568,7 +568,33 @@ hk18-prophet/
 - [ ] Live data scraping (Land Registry, RVD, Centaline)
 - [ ] Historical prediction accuracy tracking
 - [ ] PDF report export
-- [ ] Mobile-responsive design
+- [x] Mobile-responsive design
+
+---
+
+## 🚀 Things to Improve
+
+### Performance Optimization
+
+- [ ] **Parallelize thematic agents** — The 6 thematic agents are independent of each other. Running them concurrently with `Promise.all()` would turn 6 sequential LLM calls into 1 parallel batch, reducing district analysis time from ~8 calls to ~3 rounds.
+- [ ] **Remove inter-agent delays in parallel batches** — `DELAY_BETWEEN_AGENTS` (1s) adds 7 seconds of pure idle time. Within a parallel batch, delays are unnecessary. Only keep delays between phases if proxy rate-limiting is a concern.
+- [ ] **Reduce thematic agent token budgets** — Thematic agents use `maxTokens: 2000` but often generate far less. Reducing to 1000 tokens would decrease generation time and shorten the context passed to downstream agents.
+- [ ] **Cache thematic results across districts** — Thematic analysis (economy, policy, interest rates) is NOT district-specific. Caching thematic results for 1 hour means only the district agent + moderator need to run for each new district — 2 LLM calls instead of 8.
+
+### RAG Pipeline Improvements
+
+- [ ] **Add structured data sources** — Scrape actual transaction data from Land Registry, Rating and Valuation Department (RVD), and Centaline property index. Numerical data (prices, volumes, trends) would be far more useful than news headlines alone.
+- [ ] **Use real embedding models** — Replace the `simpleHash` fallback with a dedicated embedding service (e.g., Cohere, Jina, or OpenAI `text-embedding-3-small`). This enables true semantic search — finding articles about "real estate values decline" when searching for "property prices drop."
+- [ ] **Chunk and index full articles** — Currently only article title + 300 chars of description are indexed. Fetching and chunking full article bodies into ~500 token segments would provide much deeper context for agent prompts.
+- [ ] **Add temporal weighting** — Recent news should rank higher than older articles. Multiply cosine similarity score by a recency decay factor (e.g., `score * (0.5 + 0.5 * recencyFactor)`) so yesterday's policy announcement beats last month's general article.
+- [ ] **Upgrade to GraphRAG** — Build a knowledge graph with entity extraction (district → estate → policy → event relationships). Query by graph traversal instead of just vector similarity. This captures *relationships* between facts, not just individual facts.
+- [ ] **Fix `ingestArticles()` O(n×m) performance** — Currently `idx.listItems()` is called inside the ingestion loop for every article, creating O(n×m) complexity. Hoist the duplicate check outside the loop by building a `Set<url>` once, then doing O(1) `.has()` lookups.
+
+### Agent Architecture Improvements
+
+- [ ] **Global LLM concurrency auto-tuning** — Dynamically adjust `LLM_MAX_CONCURRENT` based on observed response times and error rates rather than relying on a static config value.
+- [ ] **Agent result quality scoring** — Track and compare prediction accuracy over time to weight reliable agents higher in the moderator's synthesis.
+- [ ] **Streaming agent responses** — Use SSE (Server-Sent Events) to stream partial results to the frontend instead of polling, reducing perceived latency.
 
 ---
 
